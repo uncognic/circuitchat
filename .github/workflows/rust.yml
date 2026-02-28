@@ -22,12 +22,13 @@ jobs:
       - name: Build release
         run: cargo build --release
 
-      - name: Rename binary
+      - name: Rename binary with version
         run: |
           BIN="circuitchat"
           EXT=""
           if [ "$RUNNER_OS" = "Windows" ]; then EXT=".exe"; fi
-          mv target/release/$BIN$EXT $BIN-$RUNNER_OS$EXT
+          VERSION="${GITHUB_REF#refs/tags/}"
+          mv target/release/$BIN$EXT $BIN-$VERSION-$RUNNER_OS$EXT
         shell: bash
 
       - name: Upload to GitHub Releases
