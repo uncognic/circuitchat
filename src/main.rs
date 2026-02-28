@@ -233,7 +233,7 @@ async fn run_responder(
     .await;
 
     match published {
-        Ok(Ok(())) => println!("descriptor published, service is reachable"),
+        Ok(Ok(())) => println!("- service state: Ready\ndescriptor published, service is reachable"),
         Ok(Err(e)) => return Err(e.into()),
         Err(_) => {
             println!("warning: timed out waiting for descriptor publication");
