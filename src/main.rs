@@ -22,7 +22,6 @@ use noise_peer::NoisePeer;
 use storage::{MessageDirection, Storage};
 
 const PATTERN: &str = "Noise_NN_25519_ChaChaPoly_BLAKE2s";
-const CONNECT_MAX_RETRIES: u32 = 3;
 const CONNECT_RETRY_DELAY: std::time::Duration = std::time::Duration::from_secs(10);
 
 fn build_tor_config(persist: bool) -> Result<TorClientConfig, Box<dyn Error>> {
@@ -142,20 +141,23 @@ async fn run_initiator(
     let mut prefs = StreamPrefs::new();
     prefs.connect_to_onion_services(arti_client::config::BoolOrAuto::Explicit(true));
 
-    let mut last_err: Box<dyn Error> = "connection failed".into();
-
-    for attempt in 1..=CONNECT_MAX_RETRIES {
+    let start = std::time::Instant::now();
+    let mut attempt = 0u32;
+    loop {
+        attempt += 1;
         if attempt == 1 {
             println!("connecting to {}...", peer_onion);
         } else {
             println!(
-                "retrying ({}/{})... the peer may be offline or still publishing its descriptor",
-                attempt, CONNECT_MAX_RETRIES,
+                "[{:.1}s] retrying (attempt {})... peer may still be publishing its descriptor",
+                start.elapsed().as_secs_f64(),
+                attempt
             );
         }
 
         match tor.connect_with_prefs((peer_onion, 9999u16), &prefs).await {
             Ok(stream) => {
+                println!("connected in {:.1}s", start.elapsed().as_secs_f64());
                 let np = NoisePeer::connect(stream, PATTERN).await.map_err(|e| {
                     eprintln!("initiator handshake failed: {}", e);
                     e
@@ -170,20 +172,16 @@ async fn run_initiator(
                 .await;
             }
             Err(e) => {
-                eprintln!("attempt {}/{} failed: {}", attempt, CONNECT_MAX_RETRIES, e);
-                last_err = e.into();
-                if attempt < CONNECT_MAX_RETRIES {
-                    tokio::time::sleep(CONNECT_RETRY_DELAY).await;
-                }
+                eprintln!(
+                    "[{:.1}s] attempt {} failed: {}",
+                    start.elapsed().as_secs_f64(),
+                    attempt,
+                    e
+                );
+                tokio::time::sleep(CONNECT_RETRY_DELAY).await;
             }
         }
     }
-
-    Err(format!(
-        "could not reach {} after {} attempts (is the peer online?): {}",
-        peer_onion, CONNECT_MAX_RETRIES, last_err
-    )
-    .into())
 }
 
 async fn run_responder(
@@ -209,48 +207,55 @@ async fn run_responder(
 
     let addr_str = format!("{}", onion_addr.display_unredacted());
     println!("your address: {}", addr_str);
-
     println!("publishing descriptor to the tor network...");
+
+    let start = std::time::Instant::now();
     let mut status_events = service.status_events();
-    let publish_timeout = std::time::Duration::from_secs(120);
-    let published = tokio::time::timeout(publish_timeout, async {
+    let mut last_state = None;
+
+    loop {
         if service.status().state().is_fully_reachable() {
-            return Ok(());
+            break;
         }
-        let mut last_state = None;
-        while let Some(status) = status_events.next().await {
-            let state = status.state();
-            match state {
-                State::Running | State::DegradedReachable => return Ok(()),
-                State::Broken => {
-                    return Err(format!(
-                        "onion service broken: {:?}",
-                        status.current_problem()
-                    ));
-                }
-                other => {
-                    if last_state != Some(other) {
-                        println!("- service state: {:?}", other);
-                        last_state = Some(other);
+
+        match tokio::time::timeout(std::time::Duration::from_secs(10), status_events.next()).await {
+            Ok(Some(status)) => {
+                let state = status.state();
+                match state {
+                    State::Running | State::DegradedReachable => break,
+                    State::Broken => {
+                        return Err(format!(
+                            "onion service broken: {:?}",
+                            status.current_problem()
+                        )
+                        .into());
+                    }
+                    other => {
+                        if last_state != Some(other) {
+                            println!(
+                                "[{:.1}s] service state: {:?}",
+                                start.elapsed().as_secs_f64(),
+                                other
+                            );
+                            last_state = Some(other);
+                        }
                     }
                 }
             }
-        }
-        Err("status stream ended unexpectedly".to_string())
-    })
-    .await;
-
-    match published {
-        Ok(Ok(())) => {
-            println!("- service state: Ready\ndescriptor published, service is reachable")
-        }
-        Ok(Err(e)) => return Err(e.into()),
-        Err(_) => {
-            println!("warning: timed out waiting for descriptor publication");
-            println!("the service may not be reachable yet, continuing anyway");
+            Ok(None) => return Err("status stream ended unexpectedly".into()),
+            Err(_) => {
+                println!(
+                    "[{:.1}s] still waiting for descriptor publication...",
+                    start.elapsed().as_secs_f64()
+                );
+            }
         }
     }
 
+    println!(
+        "descriptor published in {:.1}s, service is reachable",
+        start.elapsed().as_secs_f64()
+    );
     println!("share your address with your peer. waiting for connection...");
 
     let mut stream_requests = handle_rend_requests(rend_requests);

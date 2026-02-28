@@ -23,6 +23,7 @@ pub struct App {
     pub should_quit: bool,
     scroll_offset: usize,
     visible_height: usize,
+    pub show_menu: bool,
 }
 
 impl App {
@@ -33,6 +34,7 @@ impl App {
             cursor_position: 0,
             status: status.to_string(),
             should_quit: false,
+            show_menu: false,
             scroll_offset: 0,
             visible_height: 0,
         }
@@ -68,6 +70,26 @@ impl App {
     pub fn handle_key(&mut self, key: KeyEvent) -> Option<String> {
         if key.kind != KeyEventKind::Press {
             return None;
+        }
+        if let KeyCode::Char('.') = key.code {
+            if key.modifiers.contains(KeyModifiers::CONTROL) {
+                self.show_menu = !self.show_menu;
+                return None;
+            }
+        }
+
+        if self.show_menu {
+            match key.code {
+                KeyCode::Esc => {
+                    self.show_menu = false;
+                    return None;
+                }
+                KeyCode::Char('q') | KeyCode::Char('Q') | KeyCode::Enter => {
+                    self.should_quit = true;
+                    return None;
+                }
+                _ => return None,
+            }
         }
 
         match key.code {
@@ -173,6 +195,9 @@ impl App {
 
         self.draw_messages(frame, chunks[0]);
         self.draw_input(frame, chunks[1]);
+        if self.show_menu {
+            self.draw_menu(frame);
+        }
     }
 
     fn draw_messages(&mut self, frame: &mut Frame, area: Rect) {
@@ -214,6 +239,52 @@ impl App {
             .wrap(Wrap { trim: false });
 
         frame.render_widget(paragraph, area);
+
+        let label = "menu: ctrl+.";
+        let w = (label.len() as u16).saturating_add(2);
+        if area.width > w {
+            let x = area.x + area.width.saturating_sub(w);
+            let rect = Rect::new(x, area.y, w, 1);
+            let p = Paragraph::new(Line::from(Span::styled(
+                label,
+                Style::default().add_modifier(Modifier::BOLD),
+            )));
+            frame.render_widget(p, rect);
+        }
+    }
+
+    fn draw_menu(&self, frame: &mut Frame) {
+        let area = frame.area();
+        let mw = 48u16.min(area.width.saturating_sub(4));
+        let mh = 10u16.min(area.height.saturating_sub(4));
+        let mx = area.x + (area.width.saturating_sub(mw)) / 2;
+        let my = area.y + (area.height.saturating_sub(mh)) / 2;
+        let rect = Rect::new(mx, my, mw, mh);
+
+        let block = Block::default()
+            .borders(Borders::ALL)
+            .title(" Menu ")
+            .border_style(Style::default().fg(Color::White));
+
+        let lines: Vec<Line> = vec![
+            Line::from(Span::styled(
+                "Shortcuts:",
+                Style::default().add_modifier(Modifier::BOLD),
+            )),
+            Line::from(""),
+            Line::from("- Ctrl+. : Show menu"),
+            Line::from("- Ctrl+C / Ctrl+D : Quit"),
+            Line::from(""),
+            Line::from(Span::styled(
+                "Press Enter or Q to quit, Esc to close",
+                Style::default().fg(Color::DarkGray),
+            )),
+        ];
+
+        let paragraph = Paragraph::new(lines)
+            .block(block)
+            .wrap(Wrap { trim: false });
+        frame.render_widget(paragraph, rect);
     }
 
     fn draw_input(&self, frame: &mut Frame, area: Rect) {
