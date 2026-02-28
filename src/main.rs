@@ -463,8 +463,42 @@ async fn run_responder(
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
     let args: Vec<String> = env::args().collect();
+    if args.len() >= 2 && args[1] == "--reset" {
+        if let Err(e) = (|| -> Result<(), Box<dyn Error>> {
+            let exe_dir = std::env::current_exe()?
+                .parent()
+                .ok_or("could not determine exe directory")?
+                .to_path_buf();
+
+            let db = exe_dir.join("circuitchat.db");
+            if db.exists() {
+                std::fs::remove_file(&db)?;
+                println!("deleted {}", db.display());
+            }
+
+            let cache = exe_dir.join("cache");
+            if cache.exists() {
+                std::fs::remove_dir_all(&cache)?;
+                println!("deleted {}", cache.display());
+            }
+
+            let state = exe_dir.join("state");
+            if state.exists() {
+                std::fs::remove_dir_all(&state)?;
+                println!("deleted {}", state.display());
+            }
+
+            Ok(())
+        })() {
+            eprintln!("reset failed: {}", e);
+            std::process::exit(1);
+        }
+        println!("state reset complete");
+        return Ok(());
+    }
+
     if args.len() < 2 {
-        eprintln!("usage: {} (initiate <onion_addr> | listen)", args[0]);
+        eprintln!("usage: {} (initiate <onion_addr> | listen) [--reset]", args[0]);
         std::process::exit(2);
     }
 
