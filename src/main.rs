@@ -46,6 +46,8 @@ async fn chat_loop<T>(
     mut np: NoisePeer<T>,
     storage: Option<&Storage>,
     initial_status: &str,
+    time_local: bool,
+    hour24: bool,
 ) -> Result<(), Box<dyn Error>>
 where
     T: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send + Sized + 'static,
@@ -59,7 +61,7 @@ where
                 app.add_message(
                     msg.direction,
                     String::from_utf8_lossy(&msg.content).to_string(),
-                    tui::format_timestamp(msg.timestamp),
+                    tui::format_timestamp(msg.timestamp, time_local, hour24),
                 );
             }
         }
@@ -72,13 +74,13 @@ where
 
         tokio::select! {
             result = np.recv() => {
-                match result {
+                        match result {
                     Ok(msg) => {
                         let content = String::from_utf8_lossy(&msg).to_string();
                         app.add_message(
                             MessageDirection::Received,
                             content,
-                            tui::now_timestamp(),
+                                    tui::now_timestamp(time_local, hour24),
                         );
                         if let Some(s) = storage {
                             if let Err(e) = s.save_message(MessageDirection::Received, &msg) {
@@ -106,7 +108,7 @@ where
                             app.add_message(
                                 MessageDirection::Sent,
                                 text,
-                                tui::now_timestamp(),
+                                tui::now_timestamp(time_local, hour24),
                             );
                             if let Some(s) = storage {
                                 if let Err(e) = s.save_message(MessageDirection::Sent, &bytes) {
@@ -134,6 +136,8 @@ async fn run_initiator(
     tor: &TorClient<PreferredRuntime>,
     peer_onion: &str,
     storage: Option<Storage>,
+    time_local: bool,
+    hour24: bool,
 ) -> Result<(), Box<dyn Error>> {
     let mut prefs = StreamPrefs::new();
     prefs.connect_to_onion_services(arti_client::config::BoolOrAuto::Explicit(true));
@@ -160,6 +164,8 @@ async fn run_initiator(
                     np,
                     storage.as_ref(),
                     &format!("connected to peer {}", peer_onion),
+                    time_local,
+                    hour24,
                 )
                 .await;
             }
@@ -183,6 +189,8 @@ async fn run_initiator(
 async fn run_responder(
     tor: &TorClient<PreferredRuntime>,
     storage: Option<Storage>,
+    time_local: bool,
+    hour24: bool,
 ) -> Result<(), Box<dyn Error>> {
     let config = OnionServiceConfigBuilder::default()
         .nickname("circuitchat".to_owned().try_into()?)
@@ -233,7 +241,9 @@ async fn run_responder(
     .await;
 
     match published {
-        Ok(Ok(())) => println!("- service state: Ready\ndescriptor published, service is reachable"),
+        Ok(Ok(())) => {
+            println!("- service state: Ready\ndescriptor published, service is reachable")
+        }
         Ok(Err(e)) => return Err(e.into()),
         Err(_) => {
             println!("warning: timed out waiting for descriptor publication");
@@ -254,7 +264,7 @@ async fn run_responder(
         })?;
 
         let status = format!("connected | you are {}", addr_str);
-        chat_loop(np, storage.as_ref(), &status).await?;
+        chat_loop(np, storage.as_ref(), &status, time_local, hour24).await?;
     }
 
     Ok(())
@@ -293,10 +303,10 @@ async fn main() -> Result<(), Box<dyn Error>> {
                 eprintln!("usage: {} initiate <onion_addr>", args[0]);
                 std::process::exit(2);
             }
-            run_initiator(&tor, &args[2], storage).await?;
+            run_initiator(&tor, &args[2], storage, cfg.time.local, cfg.time.hour24).await?;
         }
         "listen" => {
-            run_responder(&tor, storage).await?;
+            run_responder(&tor, storage, cfg.time.local, cfg.time.hour24).await?;
         }
         _ => {
             eprintln!("unknown mode: {}", args[1]);

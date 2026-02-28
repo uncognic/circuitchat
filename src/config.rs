@@ -7,6 +7,8 @@ use std::path::PathBuf;
 pub struct Config {
     pub identity: IdentityConfig,
     pub history: HistoryConfig,
+    #[serde(default)]
+    pub time: TimeConfig,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -20,6 +22,13 @@ pub struct HistoryConfig {
     pub passphrase: String,
 }
 
+#[derive(Debug, Serialize, Deserialize, Default)]
+pub struct TimeConfig {
+    #[serde(rename = "24h")]
+    pub hour24: bool,
+    pub local: bool,
+}
+
 impl Default for Config {
     fn default() -> Self {
         Config {
@@ -27,6 +36,10 @@ impl Default for Config {
             history: HistoryConfig {
                 save: false,
                 passphrase: String::new(),
+            },
+            time: TimeConfig {
+                hour24: true,
+                local: false,
             },
         }
     }
@@ -49,6 +62,14 @@ pub fn load_or_create() -> Result<Config, Box<dyn Error>> {
 
         if config.history.save && !config.identity.persist {
             eprintln!("warning: history.save = true has no effect without identity.persist = true");
+        }
+        if !contents.contains("[time]") {
+            let new_contents = toml::to_string_pretty(&config)?;
+            std::fs::write(&path, new_contents)?;
+            println!(
+                "updated config with default [time] section at {}",
+                path.display()
+            );
         }
 
         Ok(config)

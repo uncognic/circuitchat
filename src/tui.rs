@@ -1,4 +1,5 @@
 use crate::storage::MessageDirection;
+use chrono::{Local, TimeZone, Utc};
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use ratatui::{
     Frame,
@@ -234,15 +235,34 @@ impl App {
     }
 }
 
-pub fn format_timestamp(unix_secs: i64) -> String {
-    let secs = ((unix_secs % 86400) + 86400) % 86400;
-    format!("{:02}:{:02}", secs / 3600, (secs % 3600) / 60)
+pub fn format_timestamp(unix_secs: i64, use_local: bool, hour24: bool) -> String {
+    if use_local {
+        let dt = Local
+            .timestamp_opt(unix_secs, 0)
+            .single()
+            .unwrap_or_else(|| Local::now());
+        let tz = dt.format("%Z").to_string().to_lowercase();
+        let fmt = if hour24 { "%H:%M:%S" } else { "%I:%M:%S %p" };
+        format!("{} {}", tz, dt.format(fmt))
+    } else {
+        let dt = Utc
+            .timestamp_opt(unix_secs, 0)
+            .single()
+            .unwrap_or_else(|| Utc::now());
+        let fmt = if hour24 { "%H:%M:%S" } else { "%I:%M:%S %p" };
+        format!("utc {}", dt.format(fmt))
+    }
 }
 
-pub fn now_timestamp() -> String {
-    let secs = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs() as i64;
-    format_timestamp(secs)
+pub fn now_timestamp(use_local: bool, hour24: bool) -> String {
+    if use_local {
+        let dt = Local::now();
+        let tz = dt.format("utc%Z").to_string().to_lowercase();
+        let fmt = if hour24 { "%H:%M:%S" } else { "%I:%M:%S %p" };
+        format!("{} {}", tz, dt.format(fmt))
+    } else {
+        let dt = Utc::now();
+        let fmt = if hour24 { "%H:%M:%S" } else { "%I:%M:%S %p" };
+        format!("utc {}", dt.format(fmt))
+    }
 }
