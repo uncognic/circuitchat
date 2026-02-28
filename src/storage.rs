@@ -152,6 +152,7 @@ pub struct Message {
     pub timestamp: i64,
 }
 
+#[derive(Clone, Copy)]
 pub enum MessageDirection {
     Sent,
     Received,

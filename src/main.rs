@@ -3,9 +3,9 @@ use std::error::Error;
 
 use arti_client::config::TorClientConfigBuilder;
 use arti_client::{StreamPrefs, TorClient, TorClientConfig};
+use crossterm::event::{Event, EventStream};
 use futures::StreamExt;
 use safelog::DisplayRedacted;
-use tokio::io::{AsyncBufReadExt, BufReader};
 use tor_cell::relaycell::msg::Connected;
 use tor_hsservice::config::OnionServiceConfigBuilder;
 use tor_hsservice::handle_rend_requests;
@@ -14,6 +14,7 @@ use tor_rtcompat::PreferredRuntime;
 mod config;
 mod noise_peer;
 mod storage;
+mod tui;
 
 use noise_peer::NoisePeer;
 use storage::{MessageDirection, Storage};
@@ -37,72 +38,91 @@ fn build_tor_config(persist: bool) -> Result<TorClientConfig, Box<dyn Error>> {
     Ok(config)
 }
 
-async fn chat_loop<T>(mut np: NoisePeer<T>, storage: Option<&Storage>) -> Result<(), Box<dyn Error>>
+async fn chat_loop<T>(
+    mut np: NoisePeer<T>,
+    storage: Option<&Storage>,
+    initial_status: &str,
+) -> Result<(), Box<dyn Error>>
 where
     T: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send + Sized + 'static,
 {
-    let stdin = BufReader::new(tokio::io::stdin());
-    let mut lines = stdin.lines();
+    let mut terminal = ratatui::init();
+    let mut app = tui::App::new(initial_status);
+
+    if let Some(s) = storage {
+        if let Ok(messages) = s.load_history() {
+            for msg in messages {
+                app.add_message(
+                    msg.direction,
+                    String::from_utf8_lossy(&msg.content).to_string(),
+                    tui::format_timestamp(msg.timestamp),
+                );
+            }
+        }
+    }
+
+    let mut events = EventStream::new();
 
     loop {
+        terminal.draw(|f| app.draw(f))?;
+
         tokio::select! {
             result = np.recv() => {
                 match result {
                     Ok(msg) => {
-                        println!("peer: {}", String::from_utf8_lossy(&msg));
+                        let content = String::from_utf8_lossy(&msg).to_string();
+                        app.add_message(
+                            MessageDirection::Received,
+                            content,
+                            tui::now_timestamp(),
+                        );
                         if let Some(s) = storage {
                             if let Err(e) = s.save_message(MessageDirection::Received, &msg) {
-                                eprintln!("failed to save message: {}", e);
+                                app.status = format!("save error: {}", e);
                             }
                         }
                     }
-                    Err(e) => {
-                        eprintln!("connection closed: {}", e);
+                    Err(_) => {
+                        app.status = "peer disconnected".to_string();
+                        terminal.draw(|f| app.draw(f))?;
                         break;
                     }
                 }
             }
-            line = lines.next_line() => {
-                match line? {
-                    Some(text) => {
-                        if let Err(e) = np.send(text.as_bytes()).await {
-                            eprintln!("send failed: {}", e);
-                            break;
-                        }
-                        if let Some(s) = storage {
-                            if let Err(e) = s.save_message(MessageDirection::Sent, text.as_bytes()) {
-                                eprintln!("failed to save message: {}", e);
+            event = events.next() => {
+                match event {
+                    Some(Ok(Event::Key(key))) => {
+                        if let Some(text) = app.handle_key(key) {
+                            let bytes = text.as_bytes().to_vec();
+                            if let Err(e) = np.send(&bytes).await {
+                                app.status = format!("send failed: {}", e);
+                                terminal.draw(|f| app.draw(f))?;
+                                break;
+                            }
+                            app.add_message(
+                                MessageDirection::Sent,
+                                text,
+                                tui::now_timestamp(),
+                            );
+                            if let Some(s) = storage {
+                                if let Err(e) = s.save_message(MessageDirection::Sent, &bytes) {
+                                    app.status = format!("save error: {}", e);
+                                }
                             }
                         }
+                        if app.should_quit {
+                            break;
+                        }
                     }
-                    None => break,
+                    Some(Ok(Event::Resize(_, _))) => {}
+                    Some(Err(_)) | None => break,
+                    _ => {}
                 }
             }
         }
     }
 
-    Ok(())
-}
-
-fn print_history(storage: &Storage) -> Result<(), Box<dyn Error>> {
-    let messages = storage.load_history()?;
-    if messages.is_empty() {
-        return Ok(());
-    }
-    println!("### start history ###");
-    for msg in messages {
-        let direction = match msg.direction {
-            MessageDirection::Sent => "you",
-            MessageDirection::Received => "peer",
-        };
-        println!(
-            "[{}] {}: {}",
-            msg.timestamp,
-            direction,
-            String::from_utf8_lossy(&msg.content)
-        );
-    }
-    println!("### end history ###");
+    ratatui::restore();
     Ok(())
 }
 
@@ -111,10 +131,6 @@ async fn run_initiator(
     peer_onion: &str,
     storage: Option<Storage>,
 ) -> Result<(), Box<dyn Error>> {
-    if let Some(ref s) = storage {
-        print_history(s)?;
-    }
-
     println!("connecting to {}...", peer_onion);
     let mut prefs = StreamPrefs::new();
     prefs.connect_to_onion_services(arti_client::config::BoolOrAuto::Explicit(true));
@@ -127,18 +143,13 @@ async fn run_initiator(
         e
     })?;
 
-    println!("connected. type to chat, ctrl+d to quit.");
-    chat_loop(np, storage.as_ref()).await
+    chat_loop(np, storage.as_ref(), "connected").await
 }
 
 async fn run_responder(
     tor: &TorClient<PreferredRuntime>,
     storage: Option<Storage>,
 ) -> Result<(), Box<dyn Error>> {
-    if let Some(ref s) = storage {
-        print_history(s)?;
-    }
-
     let config = OnionServiceConfigBuilder::default()
         .nickname("circuitchat".to_owned().try_into()?)
         .build()?;
@@ -154,9 +165,9 @@ async fn run_responder(
         tokio::time::sleep(std::time::Duration::from_millis(500)).await;
     };
 
-    println!("your address:");
-    println!("{}", onion_addr.display_unredacted());
-    println!("share this with your peer.");
+    let addr_str = format!("{}", onion_addr.display_unredacted());
+    println!("your address: {}", addr_str);
+    println!("share this with your peer. waiting for connection...");
 
     let mut stream_requests = handle_rend_requests(rend_requests);
 
@@ -168,8 +179,8 @@ async fn run_responder(
             e
         })?;
 
-        println!("peer connected. type to chat, ctrl+d to quit.");
-        chat_loop(np, storage.as_ref()).await?;
+        let status = format!("connected | {}", addr_str);
+        chat_loop(np, storage.as_ref(), &status).await?;
     }
 
     Ok(())
@@ -183,17 +194,14 @@ async fn main() -> Result<(), Box<dyn Error>> {
         std::process::exit(2);
     }
 
-    // load or create config
     let cfg = config::load_or_create()?;
     let passphrase = config::resolve_passphrase(&cfg)?;
 
-    // open storage if persistence is enabled
     let storage = match passphrase {
         Some(ref p) if cfg.identity.persist => Some(Storage::open(p)?),
         _ => None,
     };
 
-    // build tor config — persistent state dir if identity.persist
     let tor_config = build_tor_config(cfg.identity.persist)?;
 
     println!("bootstrapping tor...");

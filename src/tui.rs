@@ -1,0 +1,248 @@
+use crate::storage::MessageDirection;
+use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
+use ratatui::{
+    Frame,
+    layout::{Constraint, Direction, Layout, Rect},
+    style::{Color, Modifier, Style},
+    text::{Line, Span},
+    widgets::{Block, Borders, Paragraph, Wrap},
+};
+
+pub struct ChatMessage {
+    pub direction: MessageDirection,
+    pub content: String,
+    pub timestamp: String,
+}
+
+pub struct App {
+    pub messages: Vec<ChatMessage>,
+    pub input: String,
+    pub cursor_position: usize,
+    pub status: String,
+    pub should_quit: bool,
+    scroll_offset: usize,
+    visible_height: usize,
+}
+
+impl App {
+    pub fn new(status: &str) -> Self {
+        Self {
+            messages: Vec::new(),
+            input: String::new(),
+            cursor_position: 0,
+            status: status.to_string(),
+            should_quit: false,
+            scroll_offset: 0,
+            visible_height: 0,
+        }
+    }
+
+    pub fn add_message(&mut self, direction: MessageDirection, content: String, timestamp: String) {
+        self.messages.push(ChatMessage {
+            direction,
+            content,
+            timestamp,
+        });
+        self.scroll_to_bottom();
+    }
+
+    fn scroll_to_bottom(&mut self) {
+        let total = self.messages.len();
+        if total > self.visible_height && self.visible_height > 0 {
+            self.scroll_offset = total - self.visible_height;
+        } else {
+            self.scroll_offset = 0;
+        }
+    }
+
+    fn scroll_up(&mut self, n: usize) {
+        self.scroll_offset = self.scroll_offset.saturating_sub(n);
+    }
+
+    fn scroll_down(&mut self, n: usize) {
+        let max = self.messages.len().saturating_sub(self.visible_height);
+        self.scroll_offset = (self.scroll_offset + n).min(max);
+    }
+
+    pub fn handle_key(&mut self, key: KeyEvent) -> Option<String> {
+        if key.kind != KeyEventKind::Press {
+            return None;
+        }
+
+        match key.code {
+            KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                self.should_quit = true;
+                None
+            }
+            KeyCode::Char('d') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                self.should_quit = true;
+                None
+            }
+            KeyCode::Enter => {
+                if self.input.is_empty() {
+                    return None;
+                }
+                let text: String = self.input.drain(..).collect();
+                self.cursor_position = 0;
+                Some(text)
+            }
+            KeyCode::Char(c) => {
+                self.input.insert(self.cursor_position, c);
+                self.cursor_position += c.len_utf8();
+                None
+            }
+            KeyCode::Backspace => {
+                if self.cursor_position > 0 {
+                    let prev = self.input[..self.cursor_position]
+                        .char_indices()
+                        .next_back()
+                        .map(|(i, _)| i)
+                        .unwrap_or(0);
+                    self.input.drain(prev..self.cursor_position);
+                    self.cursor_position = prev;
+                }
+                None
+            }
+            KeyCode::Delete => {
+                if self.cursor_position < self.input.len() {
+                    let end = self.input[self.cursor_position..]
+                        .char_indices()
+                        .nth(1)
+                        .map(|(i, _)| self.cursor_position + i)
+                        .unwrap_or(self.input.len());
+                    self.input.drain(self.cursor_position..end);
+                }
+                None
+            }
+            KeyCode::Left => {
+                if self.cursor_position > 0 {
+                    self.cursor_position = self.input[..self.cursor_position]
+                        .char_indices()
+                        .next_back()
+                        .map(|(i, _)| i)
+                        .unwrap_or(0);
+                }
+                None
+            }
+            KeyCode::Right => {
+                if self.cursor_position < self.input.len() {
+                    self.cursor_position = self.input[self.cursor_position..]
+                        .char_indices()
+                        .nth(1)
+                        .map(|(i, _)| self.cursor_position + i)
+                        .unwrap_or(self.input.len());
+                }
+                None
+            }
+            KeyCode::Home => {
+                self.cursor_position = 0;
+                None
+            }
+            KeyCode::End => {
+                self.cursor_position = self.input.len();
+                None
+            }
+            KeyCode::PageUp => {
+                let h = self.visible_height.max(1);
+                self.scroll_up(h);
+                None
+            }
+            KeyCode::PageDown => {
+                let h = self.visible_height.max(1);
+                self.scroll_down(h);
+                None
+            }
+            KeyCode::Up => {
+                self.scroll_up(1);
+                None
+            }
+            KeyCode::Down => {
+                self.scroll_down(1);
+                None
+            }
+            _ => None,
+        }
+    }
+
+    pub fn draw(&mut self, frame: &mut Frame) {
+        let chunks = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([Constraint::Min(1), Constraint::Length(3)])
+            .split(frame.area());
+
+        self.draw_messages(frame, chunks[0]);
+        self.draw_input(frame, chunks[1]);
+    }
+
+    fn draw_messages(&mut self, frame: &mut Frame, area: Rect) {
+        let inner_height = area.height.saturating_sub(2) as usize;
+        self.visible_height = inner_height;
+
+        let block = Block::default()
+            .borders(Borders::ALL)
+            .title(" circuitchat ")
+            .title_bottom(Line::from(format!(" {} ", self.status)).right_aligned())
+            .border_style(Style::default().fg(Color::DarkGray));
+
+        let end = self.messages.len().min(self.scroll_offset + inner_height);
+        let start = self.scroll_offset.min(end);
+
+        let lines: Vec<Line> = self.messages[start..end]
+            .iter()
+            .map(|msg| {
+                let (label, color) = match msg.direction {
+                    MessageDirection::Sent => ("you", Color::Green),
+                    MessageDirection::Received => ("peer", Color::Cyan),
+                };
+                Line::from(vec![
+                    Span::styled(
+                        format!("[{}] ", msg.timestamp),
+                        Style::default().fg(Color::DarkGray),
+                    ),
+                    Span::styled(
+                        format!("{}: ", label),
+                        Style::default().fg(color).add_modifier(Modifier::BOLD),
+                    ),
+                    Span::styled(msg.content.clone(), Style::default().fg(Color::White)),
+                ])
+            })
+            .collect();
+
+        let paragraph = Paragraph::new(lines)
+            .block(block)
+            .wrap(Wrap { trim: false });
+
+        frame.render_widget(paragraph, area);
+    }
+
+    fn draw_input(&self, frame: &mut Frame, area: Rect) {
+        let block = Block::default()
+            .borders(Borders::ALL)
+            .title(" message ")
+            .border_style(Style::default().fg(Color::DarkGray));
+
+        let paragraph = Paragraph::new(Line::from(vec![
+            Span::styled("> ", Style::default().fg(Color::DarkGray)),
+            Span::raw(self.input.clone()),
+        ]))
+        .block(block);
+
+        frame.render_widget(paragraph, area);
+
+        let chars_before = self.input[..self.cursor_position].chars().count();
+        frame.set_cursor_position((area.x + 1 + 2 + chars_before as u16, area.y + 1));
+    }
+}
+
+pub fn format_timestamp(unix_secs: i64) -> String {
+    let secs = ((unix_secs % 86400) + 86400) % 86400;
+    format!("{:02}:{:02}", secs / 3600, (secs % 3600) / 60)
+}
+
+pub fn now_timestamp() -> String {
+    let secs = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs() as i64;
+    format_timestamp(secs)
+}

@@ -1,2 +1,50 @@
 # circuitchat
-Tor-first encrypted messaging using the Signal Protocol
+P2P encrypted messaging over Tor, built in Rust.
+
+It creates ephemeral Tor onion services for real-time messaging with the [Noise Protocol Framework](https://noiseprotocol.org/). No servers, no accounts, no metadata, just two peers communicating over Tor circuits.
+
+## Features
+
+- Tor-first: Uses [Arti](https://gitlab.torproject.org/tpo/core/arti) to bootstrap a Tor client and expose onion services directly from the binary. No external Tor daemon required.
+- E2EE: Every session performs a full Noise `NN` handshake (`Noise_NN_25519_ChaChaPoly_BLAKE2s`) over the Tor stream, so traffic is encrypted independent of Tor's own transport layer.
+- TUI: Chat interface powered by [ratatui](https://github.com/ratatui/ratatui) with scrollable message history, timestamps, and a status bar.
+- Encrypted local history: Optionally persist chat messages in a local SQLite database, encrypted at rest with XChaCha20-Poly1305 (key derived from a passphrase via Argon2).
+- Zero-config defaults: Works out of the box with a single command, no setup required (other than installing Rust)
+
+## How it works
+
+1. Peer A runs `circuitchat listen`, which bootstraps Tor and publishes a temporary onion address.
+2. Peer A shares that onion address with Peer B through any out-of-band channel.
+3. Peer B runs `circuitchat initiate <onion_address>`, connects over Tor, and both peers perform a Noise handshake.
+4. A chat session begins with E2EE messages sent directly over the Tor stream.
+
+## Usage
+### Listen for a connection
+```sh
+circuitchat listen
+```
+The program bootstraps Tor, creates an onion service, and prints your `.onion` address. Share this address with your peer.
+
+### Connect to a peer
+```sh
+circuitchat initiate <onion_address>
+```
+Connects to the given onion address over Tor and starts a chat session.
+
+## Configuration
+A `circuitchat.toml` file is created next to the binary on first run:
+
+```toml
+[identity]
+persist = false
+
+[history]
+save = false
+passphrase = ""
+```
+`identity.persist`: When `true`, Tor state and cache are saved between runs so the onion address remains stable, and chat history is stored locally if history.save = true.
+`history.save`: When `true` (requires `identity.persist = true`), messages are saved to an encrypted SQLite database.
+`history.passphrase`: Hardcoded passphrase for the message database. If left empty, the passphrase is prompted interactively at startup.
+
+## Disclaimer
+Note: The `Noise_NN` pattern provides no authentication, it protects against passive eavesdroppers but not active MITM attacks beyond what Tor itself provides. 
