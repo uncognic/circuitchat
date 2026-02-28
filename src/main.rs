@@ -3,7 +3,7 @@ use std::error::Error;
 
 use arti_client::config::TorClientConfigBuilder;
 use arti_client::{StreamPrefs, TorClient, TorClientConfig};
-use crossterm::event::{Event, EventStream};
+use crossterm::event::{Event, EventStream, KeyCode, KeyEventKind};
 use futures::StreamExt;
 use safelog::DisplayRedacted;
 use tor_cell::relaycell::msg::Connected;
@@ -14,6 +14,7 @@ use tor_rtcompat::PreferredRuntime;
 use tor_hsservice::status::State;
 
 mod config;
+mod file_transfer;
 mod noise_peer;
 mod storage;
 mod tui;
@@ -67,23 +68,166 @@ where
     }
 
     let mut events = EventStream::new();
+    let mut incoming_file: Option<file_transfer::IncomingFile> = None;
+    let mut outgoing_file: Option<file_transfer::OutgoingFile> = None;
 
     loop {
         terminal.draw(|f| app.draw(f))?;
 
+        // file mode
+        if outgoing_file.is_some() {
+            let cancelled = tokio::select! {
+                biased;
+                event = events.next() => {
+                    matches!(
+                        event,
+                        Some(Ok(Event::Key(crossterm::event::KeyEvent {
+                            code: KeyCode::Esc,
+                            kind: KeyEventKind::Press,
+                            ..
+                        })))
+                    )
+                }
+                _ = tokio::time::sleep(std::time::Duration::from_millis(1)) => false,
+            };
+
+            if cancelled {
+                let _ = np.send(&file_transfer::encode_cancel()).await;
+                let out = outgoing_file.take().unwrap();
+                app.add_message(
+                    MessageDirection::Sent,
+                    format!("[file] cancelled sending {}", out.name),
+                    tui::now_timestamp(time_local, hour24),
+                );
+                app.clear_send_progress();
+                continue;
+            }
+
+            let result = outgoing_file.as_mut().unwrap().read_next_chunk();
+            match result {
+                Ok(Some(data)) => {
+                    if let Err(e) = np.send(&file_transfer::encode_chunk(&data)).await {
+                        app.add_message(
+                            MessageDirection::Sent,
+                            format!("[file] send error: {}", e),
+                            tui::now_timestamp(time_local, hour24),
+                        );
+                        app.clear_send_progress();
+                        outgoing_file = None;
+                    } else {
+                        let sent = outgoing_file.as_ref().unwrap().sent;
+                        app.update_send_progress(sent);
+                    }
+                }
+                Ok(None) => {
+                    let _ = np.send(&file_transfer::encode_done()).await;
+                    let out = outgoing_file.take().unwrap();
+                    app.add_message(
+                        MessageDirection::Sent,
+                        format!(
+                            "[file] sent {} ({})",
+                            out.name,
+                            file_transfer::format_size(out.size)
+                        ),
+                        tui::now_timestamp(time_local, hour24),
+                    );
+                    app.clear_send_progress();
+                }
+                Err(e) => {
+                    app.add_message(
+                        MessageDirection::Sent,
+                        format!("[file] read error: {}", e),
+                        tui::now_timestamp(time_local, hour24),
+                    );
+                    app.clear_send_progress();
+                    outgoing_file = None;
+                }
+            }
+            continue;
+        }
+        // normal mode
         tokio::select! {
             result = np.recv() => {
-                        match result {
+                match result {
                     Ok(msg) => {
-                        let content = String::from_utf8_lossy(&msg).to_string();
-                        app.add_message(
-                            MessageDirection::Received,
-                            content,
+                        match file_transfer::parse_message(&msg) {
+                            file_transfer::ParsedMessage::Text(content) => {
+                                app.add_message(
+                                    MessageDirection::Received,
+                                    content,
                                     tui::now_timestamp(time_local, hour24),
-                        );
-                        if let Some(s) = storage {
-                            if let Err(e) = s.save_message(MessageDirection::Received, &msg) {
-                                app.status = format!("save error: {}", e);
+                                );
+                                if let Some(s) = storage {
+                                    if let Err(e) = s.save_message(MessageDirection::Received, &msg) {
+                                        app.status = format!("save error: {}", e);
+                                    }
+                                }
+                            }
+                            file_transfer::ParsedMessage::FileOffer { name, size } => {
+                                let size_str = file_transfer::format_size(size);
+                                app.add_message(
+                                    MessageDirection::Received,
+                                    format!("[file] receiving {} ({})", name, size_str),
+                                    tui::now_timestamp(time_local, hour24),
+                                );
+                                match file_transfer::IncomingFile::begin(&name, size) {
+                                    Ok(inc) => {
+                                        app.set_recv_progress(name.clone(), size);
+                                        incoming_file = Some(inc);
+                                    }
+                                    Err(e) => {
+                                        app.status = format!("file receive error: {}", e);
+                                    }
+                                }
+                            }
+                            file_transfer::ParsedMessage::FileChunk(data) => {
+                                if let Some(ref mut inc) = incoming_file {
+                                    if let Err(e) = inc.write_chunk(&data) {
+                                        app.status = format!("file write error: {}", e);
+                                        app.clear_recv_progress();
+                                        incoming_file = None;
+                                    } else {
+                                        app.update_recv_progress(inc.received);
+                                    }
+                                }
+                            }
+                            file_transfer::ParsedMessage::FileDone => {
+                                if let Some(inc) = incoming_file.take() {
+                                    let name = inc.name.clone();
+                                    let size = inc.size;
+                                    match inc.finish() {
+                                        Ok(path) => {
+                                            app.add_message(
+                                                MessageDirection::Received,
+                                                format!(
+                                                    "[file] saved {} ({}) -> {}",
+                                                    name,
+                                                    file_transfer::format_size(size),
+                                                    path.display()
+                                                ),
+                                                tui::now_timestamp(time_local, hour24),
+                                            );
+                                            app.status = "file received".to_string();
+                                            app.clear_recv_progress();
+                                        }
+                                        Err(e) => {
+                                            app.status = format!("file save error: {}", e);
+                                            app.clear_recv_progress();
+                                        }
+                                    }
+                                }
+                            }
+                            file_transfer::ParsedMessage::FileCancel => {
+                                if let Some(inc) = incoming_file.take() {
+                                    inc.cancel();
+                                    app.add_message(
+                                        MessageDirection::Received,
+                                        "[file] peer cancelled the transfer".to_string(),
+                                        tui::now_timestamp(time_local, hour24),
+                                    );
+                                    app.status = "transfer cancelled by peer".to_string();
+                                    app.clear_recv_progress();
+                                }
                             }
                         }
                     }
@@ -98,20 +242,61 @@ where
                 match event {
                     Some(Ok(Event::Key(key))) => {
                         if let Some(text) = app.handle_key(key) {
-                            let bytes = text.as_bytes().to_vec();
-                            if let Err(e) = np.send(&bytes).await {
-                                app.status = format!("send failed: {}", e);
-                                terminal.draw(|f| app.draw(f))?;
-                                break;
-                            }
-                            app.add_message(
-                                MessageDirection::Sent,
-                                text,
-                                tui::now_timestamp(time_local, hour24),
-                            );
-                            if let Some(s) = storage {
-                                if let Err(e) = s.save_message(MessageDirection::Sent, &bytes) {
-                                    app.status = format!("save error: {}", e);
+                            if text.starts_with("/send ") {
+                                let path = text[6..].trim();
+                                match file_transfer::OutgoingFile::open(path) {
+                                    Ok(out) => {
+                                        if let Err(e) = np.send(
+                                            &file_transfer::encode_offer(&out.name, out.size),
+                                        ).await {
+                                            app.status = format!("send failed: {}", e);
+                                        } else {
+                                            app.add_message(
+                                                MessageDirection::Sent,
+                                                format!(
+                                                    "[file] sending {} ({})",
+                                                    out.name,
+                                                    file_transfer::format_size(out.size)
+                                                ),
+                                                tui::now_timestamp(time_local, hour24),
+                                            );
+                                            app.set_send_progress(out.name.clone(), out.size);
+                                            outgoing_file = Some(out);
+                                        }
+                                    }
+                                    Err(e) => {
+                                        app.status = format!("cannot open file: {}", e);
+                                    }
+                                }
+                            } else if text == "/cancel" {
+                                if let Some(inc) = incoming_file.take() {
+                                    inc.cancel();
+                                    app.add_message(
+                                        MessageDirection::Sent,
+                                        "[file] cancelled receiving".to_string(),
+                                        tui::now_timestamp(time_local, hour24),
+                                    );
+                                    app.status = "cancelled incoming transfer".to_string();
+                                    app.clear_recv_progress();
+                                } else {
+                                    app.status = "no active incoming transfer".to_string();
+                                }
+                            } else {
+                                let bytes = text.as_bytes().to_vec();
+                                if let Err(e) = np.send(&bytes).await {
+                                    app.status = format!("send failed: {}", e);
+                                    terminal.draw(|f| app.draw(f))?;
+                                    break;
+                                }
+                                app.add_message(
+                                    MessageDirection::Sent,
+                                    text,
+                                    tui::now_timestamp(time_local, hour24),
+                                );
+                                if let Some(s) = storage {
+                                    if let Err(e) = s.save_message(MessageDirection::Sent, &bytes) {
+                                        app.status = format!("save error: {}", e);
+                                    }
                                 }
                             }
                         }

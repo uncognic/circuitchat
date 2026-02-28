@@ -4,6 +4,7 @@ use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 pub struct NoisePeer<T> {
     stream: T,
     transport: snow::TransportState,
+    read_buf: Vec<u8>,
 }
 
 impl<T: AsyncRead + AsyncWrite + Unpin> NoisePeer<T> {
@@ -20,7 +21,11 @@ impl<T: AsyncRead + AsyncWrite + Unpin> NoisePeer<T> {
         initiator.read_message(&in_msg, &mut tmp)?;
 
         let transport = initiator.into_transport_mode()?;
-        Ok(NoisePeer { stream, transport })
+        Ok(NoisePeer {
+            stream,
+            transport,
+            read_buf: Vec::new(),
+        })
     }
 
     pub async fn accept(mut stream: T, pattern: &str) -> Result<Self, Box<dyn Error>> {
@@ -36,7 +41,11 @@ impl<T: AsyncRead + AsyncWrite + Unpin> NoisePeer<T> {
         send_frame(&mut stream, &out_msg[..len]).await?;
 
         let transport = responder.into_transport_mode()?;
-        Ok(NoisePeer { stream, transport })
+        Ok(NoisePeer {
+            stream,
+            transport,
+            read_buf: Vec::new(),
+        })
     }
 
     pub async fn send(&mut self, plaintext: &[u8]) -> Result<(), Box<dyn Error>> {
@@ -47,7 +56,34 @@ impl<T: AsyncRead + AsyncWrite + Unpin> NoisePeer<T> {
     }
 
     pub async fn recv(&mut self) -> Result<Vec<u8>, Box<dyn Error>> {
-        let ct = recv_frame(&mut self.stream).await?;
+        while self.read_buf.len() < 4 {
+            let mut tmp = [0u8; 4096];
+            let n = self.stream.read(&mut tmp).await?;
+            if n == 0 {
+                return Err("connection closed".into());
+            }
+            self.read_buf.extend_from_slice(&tmp[..n]);
+        }
+
+        let frame_len = u32::from_be_bytes(self.read_buf[..4].try_into().unwrap()) as usize;
+        if frame_len > 65535 {
+            return Err("frame too large".into());
+        }
+
+        let total = 4 + frame_len;
+
+        while self.read_buf.len() < total {
+            let mut tmp = [0u8; 4096];
+            let n = self.stream.read(&mut tmp).await?;
+            if n == 0 {
+                return Err("connection closed mid-frame".into());
+            }
+            self.read_buf.extend_from_slice(&tmp[..n]);
+        }
+
+        let ct = self.read_buf[4..total].to_vec();
+        self.read_buf.drain(..total);
+
         let mut pt = vec![0u8; ct.len()];
         let len = self.transport.read_message(&ct, &mut pt)?;
         pt.truncate(len);

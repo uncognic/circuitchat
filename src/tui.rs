@@ -15,6 +15,22 @@ pub struct ChatMessage {
     pub timestamp: String,
 }
 
+pub struct TransferProgress {
+    pub name: String,
+    pub size: u64,
+    pub transferred: u64,
+}
+
+impl TransferProgress {
+    fn pct(&self) -> u16 {
+        if self.size == 0 {
+            100
+        } else {
+            (self.transferred * 100 / self.size) as u16
+        }
+    }
+}
+
 pub struct App {
     pub messages: Vec<ChatMessage>,
     pub input: String,
@@ -24,6 +40,8 @@ pub struct App {
     scroll_offset: usize,
     visible_height: usize,
     pub show_menu: bool,
+    pub send_progress: Option<TransferProgress>,
+    pub recv_progress: Option<TransferProgress>,
 }
 
 impl App {
@@ -37,6 +55,8 @@ impl App {
             show_menu: false,
             scroll_offset: 0,
             visible_height: 0,
+            send_progress: None,
+            recv_progress: None,
         }
     }
 
@@ -47,6 +67,42 @@ impl App {
             timestamp,
         });
         self.scroll_to_bottom();
+    }
+
+    pub fn set_send_progress(&mut self, name: String, size: u64) {
+        self.send_progress = Some(TransferProgress {
+            name,
+            size,
+            transferred: 0,
+        });
+    }
+
+    pub fn update_send_progress(&mut self, sent: u64) {
+        if let Some(ref mut p) = self.send_progress {
+            p.transferred = sent;
+        }
+    }
+
+    pub fn clear_send_progress(&mut self) {
+        self.send_progress = None;
+    }
+
+    pub fn set_recv_progress(&mut self, name: String, size: u64) {
+        self.recv_progress = Some(TransferProgress {
+            name,
+            size,
+            transferred: 0,
+        });
+    }
+
+    pub fn update_recv_progress(&mut self, received: u64) {
+        if let Some(ref mut p) = self.recv_progress {
+            p.transferred = received;
+        }
+    }
+
+    pub fn clear_recv_progress(&mut self) {
+        self.recv_progress = None;
     }
 
     fn scroll_to_bottom(&mut self) {
@@ -71,14 +127,14 @@ impl App {
         if key.kind != KeyEventKind::Press {
             return None;
         }
-        if let KeyCode::Char('.') = key.code {
-            if key.modifiers.contains(KeyModifiers::CONTROL) {
+        if let KeyCode::Char('m') = key.code {
+            if key.modifiers.contains(KeyModifiers::ALT) {
                 self.show_menu = !self.show_menu;
                 return None;
             }
         }
 
-        if self.show_menu {
+        if self.show_menu && self.recv_progress.is_none() {
             match key.code {
                 KeyCode::Esc => {
                     self.show_menu = false;
@@ -86,6 +142,12 @@ impl App {
                 }
                 KeyCode::Char('q') | KeyCode::Char('Q') | KeyCode::Enter => {
                     self.should_quit = true;
+                    return None;
+                }
+                KeyCode::Char('s') | KeyCode::Char('S') => {
+                    self.show_menu = false;
+                    self.input = "/send ".to_string();
+                    self.cursor_position = self.input.len();
                     return None;
                 }
                 _ => return None,
@@ -195,7 +257,11 @@ impl App {
 
         self.draw_messages(frame, chunks[0]);
         self.draw_input(frame, chunks[1]);
-        if self.show_menu {
+        if self.send_progress.is_some() {
+            self.draw_transfer_modal(frame, true);
+        } else if self.recv_progress.is_some() {
+            self.draw_transfer_modal(frame, false);
+        } else if self.show_menu {
             self.draw_menu(frame);
         }
     }
@@ -240,7 +306,7 @@ impl App {
 
         frame.render_widget(paragraph, area);
 
-        let label = "menu: ctrl+.";
+        let label = "menu: alt+m";
         let w = (label.len() as u16).saturating_add(2);
         if area.width > w {
             let x = area.x + area.width.saturating_sub(w);
@@ -256,7 +322,7 @@ impl App {
     fn draw_menu(&self, frame: &mut Frame) {
         let area = frame.area();
         let mw = 48u16.min(area.width.saturating_sub(4));
-        let mh = 10u16.min(area.height.saturating_sub(4));
+        let mh = 14u16.min(area.height.saturating_sub(4));
         let mx = area.x + (area.width.saturating_sub(mw)) / 2;
         let my = area.y + (area.height.saturating_sub(mh)) / 2;
         let rect = Rect::new(mx, my, mw, mh);
@@ -272,13 +338,85 @@ impl App {
                 Style::default().add_modifier(Modifier::BOLD),
             )),
             Line::from(""),
-            Line::from("- Ctrl+. : Show menu"),
-            Line::from("- Ctrl+C / Ctrl+D : Quit"),
+            Line::from("  Alt+M : Toggle menu"),
+            Line::from("  Ctrl+C / Ctrl+D : Quit"),
             Line::from(""),
             Line::from(Span::styled(
-                "Press Enter or Q to quit, Esc to close",
+                "Actions:",
+                Style::default().add_modifier(Modifier::BOLD),
+            )),
+            Line::from(""),
+            Line::from("  S : Send a file"),
+            Line::from("  /cancel : Cancel incoming transfer"),
+            Line::from(""),
+            Line::from(Span::styled(
+                "Q / Enter to quit · Esc to close",
                 Style::default().fg(Color::DarkGray),
             )),
+        ];
+
+        let paragraph = Paragraph::new(lines)
+            .block(block)
+            .wrap(Wrap { trim: false });
+        frame.render_widget(paragraph, rect);
+    }
+
+    fn draw_transfer_modal(&self, frame: &mut Frame, is_send: bool) {
+        let t = if is_send {
+            self.send_progress.as_ref().unwrap()
+        } else {
+            self.recv_progress.as_ref().unwrap()
+        };
+
+        let area = frame.area();
+        let mw = 52u16.min(area.width.saturating_sub(4));
+        let mh = 8u16.min(area.height.saturating_sub(4));
+        let mx = area.x + (area.width.saturating_sub(mw)) / 2;
+        let my = area.y + (area.height.saturating_sub(mh)) / 2;
+        let rect = Rect::new(mx, my, mw, mh);
+
+        let pct = t.pct();
+        let bar_inner = (mw as usize).saturating_sub(8);
+        let filled = if t.size == 0 {
+            bar_inner
+        } else {
+            (bar_inner as u64 * t.transferred / t.size) as usize
+        };
+        let empty = bar_inner.saturating_sub(filled);
+        let bar = format!(
+            " [{}{}] {}%",
+            "\u{2588}".repeat(filled),
+            "\u{2591}".repeat(empty),
+            pct
+        );
+
+        let size_line = format!(
+            " {} / {}",
+            crate::file_transfer::format_size(t.transferred),
+            crate::file_transfer::format_size(t.size)
+        );
+
+        let (title, color, hint) = if is_send {
+            (" Sending File ", Color::Yellow, " Esc to cancel")
+        } else {
+            (" Receiving File ", Color::Cyan, " /cancel to abort")
+        };
+
+        let block = Block::default()
+            .borders(Borders::ALL)
+            .title(title)
+            .border_style(Style::default().fg(color));
+
+        let lines: Vec<Line> = vec![
+            Line::from(""),
+            Line::from(Span::styled(
+                format!(" {}", t.name),
+                Style::default().add_modifier(Modifier::BOLD),
+            )),
+            Line::from(size_line),
+            Line::from(bar),
+            Line::from(""),
+            Line::from(Span::styled(hint, Style::default().fg(Color::DarkGray))),
         ];
 
         let paragraph = Paragraph::new(lines)
