@@ -47,4 +47,4 @@ passphrase = ""
 `history.passphrase`: Hardcoded passphrase for the message database. If left empty, the passphrase is prompted interactively at startup.
 
 ## Disclaimer
-Note: The `Noise_NN` pattern provides no authentication, it protects against passive eavesdroppers but not active MITM attacks beyond what Tor itself provides. 
+The `Noise_NN` pattern provides no authentication, it protects against passive eavesdroppers but not active MITM attacks beyond what Tor itself provides. This was chosen because sessions are ephemeral and short-lived.
