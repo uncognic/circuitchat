@@ -1,7 +1,7 @@
 # circuitchat
-P2P encrypted messaging over Tor, built in Rust.
+P2P encrypted messaging over Tor made in Rust.
 
-It creates ephemeral Tor onion services for real-time messaging with the [Noise Protocol Framework](https://noiseprotocol.org/). No servers, no accounts, no metadata, just two peers communicating over Tor circuits.
+It creates ephemeral Tor onion services for real-time messaging with the [Noise Protocol Framework](https://noiseprotocol.org/). No server, no identity, it is meant to reduce metadata leakage.
 
 ## Features
 
