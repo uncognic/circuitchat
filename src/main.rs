@@ -143,7 +143,7 @@ async fn run_initiator(
         e
     })?;
 
-    chat_loop(np, storage.as_ref(), "connected").await
+    chat_loop(np, storage.as_ref(), &format!("connected to peer {}", peer_onion)).await
 }
 
 async fn run_responder(
@@ -179,7 +179,7 @@ async fn run_responder(
             e
         })?;
 
-        let status = format!("connected | {}", addr_str);
+        let status = format!("connected | you are {}", addr_str);
         chat_loop(np, storage.as_ref(), &status).await?;
     }
 
