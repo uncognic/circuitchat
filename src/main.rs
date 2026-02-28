@@ -1,105 +1,136 @@
 use std::env;
 use std::error::Error;
-use std::net::{TcpListener, TcpStream};
-use std::thread;
-use std::time::{Duration, Instant};
 
-mod noise_client;
-use noise_client::NoiseClient;
+use arti_client::{StreamPrefs, TorClient, TorClientConfig};
+use futures::StreamExt;
+use safelog::DisplayRedacted;
+use tokio::io::{AsyncBufReadExt, BufReader};
+use tor_cell::relaycell::msg::Connected;
+use tor_hsservice::config::OnionServiceConfigBuilder;
+use tor_hsservice::handle_rend_requests;
+use tor_rtcompat::PreferredRuntime;
 
-fn run_client(addr: &str, pattern: &str) -> Result<(), Box<dyn Error>> {
-    let stream = TcpStream::connect(addr)?;
-    let mut nc = NoiseClient::connect(stream, pattern)?;
-    nc.send(b"hello from client")?;
-    let reply = nc.recv()?;
-    println!("server replied: {}", String::from_utf8_lossy(&reply));
-    Ok(())
-}
+mod noise_peer;
+use noise_peer::NoisePeer;
 
-fn run_server(addr: &str, pattern: &str) -> Result<(), Box<dyn Error>> {
-    let listener = TcpListener::bind(addr)?;
-    println!("listening on {}", addr);
-    for stream in listener.incoming() {
-        let stream = stream?;
-        let mut nc = NoiseClient::accept(stream, pattern)?;
-        let msg = nc.recv()?;
-        println!("got: {}", String::from_utf8_lossy(&msg));
-        nc.send(b"hello from server")?;
-        break;
-    }
-    Ok(())
-}
+const PATTERN: &str = "Noise_NN_25519_ChaChaPoly_BLAKE2s";
 
-fn run_p2p(local_addr: &str, peer_addr: &str, pattern: &str) -> Result<(), Box<dyn Error>> {
-    if local_addr < peer_addr {
-        let start = Instant::now();
-        let mut stream: Option<TcpStream> = None;
-        while start.elapsed() < Duration::from_secs(5) {
-            match TcpStream::connect(peer_addr) {
-                Ok(s) => {
-                    stream = Some(s);
-                    break;
+async fn chat_loop<T>(mut np: NoisePeer<T>) -> Result<(), Box<dyn Error>>
+where
+    T: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send + 'static,
+{
+    let stdin = BufReader::new(tokio::io::stdin());
+    let mut lines = stdin.lines();
+
+    loop {
+        tokio::select! {
+            result = np.recv() => {
+                match result {
+                    Ok(msg) => println!("peer: {}", String::from_utf8_lossy(&msg)),
+                    Err(e) => {
+                        eprintln!("connection closed: {}", e);
+                        break;
+                    }
                 }
-                Err(_) => thread::sleep(Duration::from_millis(100)),
+            }
+            line = lines.next_line() => {
+                match line? {
+                    Some(text) => {
+                        if let Err(e) = np.send(text.as_bytes()).await {
+                            eprintln!("send failed: {}", e);
+                            break;
+                        }
+                    }
+                    None => break,
+                }
             }
         }
-        let stream = stream.ok_or(Box::<dyn std::error::Error>::from(
-            "failed to connect to peer",
-        ))?;
-        let mut nc = match NoiseClient::connect(stream, pattern) {
-            Ok(c) => c,
-            Err(e) => {
-                eprintln!("p2p initiator handshake failed: {}", e);
-                return Err(e);
-            }
-        };
-        nc.send(b"hello from p2p-initiator")?;
-        let reply = nc.recv()?;
-        println!("peer replied: {}", String::from_utf8_lossy(&reply));
-    } else {
-        println!("waiting for incoming connection on {}", local_addr);
-        let (stream, _) = TcpListener::bind(local_addr)?.accept()?;
-        let mut nc = match NoiseClient::accept(stream, pattern) {
-            Ok(c) => c,
-            Err(e) => {
-                eprintln!("p2p responder handshake failed: {}", e);
-                return Err(e);
-            }
-        };
-        let msg = nc.recv()?;
-        println!("got: {}", String::from_utf8_lossy(&msg));
-        nc.send(b"hello from p2p-responder")?;
     }
 
     Ok(())
 }
 
-fn main() -> Result<(), Box<dyn Error>> {
+async fn run_initiator(
+    tor: &TorClient<PreferredRuntime>,
+    peer_onion: &str,
+) -> Result<(), Box<dyn Error>> {
+    println!("connecting to {}...", peer_onion);
+    let mut prefs = StreamPrefs::new();
+    prefs.connect_to_onion_services(arti_client::config::BoolOrAuto::Explicit(true));
+    let stream = tor
+        .connect_with_prefs((peer_onion, 9999u16), &prefs)
+        .await?;
+
+    let np = NoisePeer::connect(stream, PATTERN).await.map_err(|e| {
+        eprintln!("initiator handshake failed: {}", e);
+        e
+    })?;
+
+    println!("connected. type to chat, ctrl+d to quit.");
+    chat_loop(np).await
+}
+
+async fn run_responder(tor: &TorClient<PreferredRuntime>) -> Result<(), Box<dyn Error>> {
+    let config = OnionServiceConfigBuilder::default()
+        .nickname("circuitchat".to_owned().try_into()?)
+        .build()?;
+
+    let (service, rend_requests) = tor
+        .launch_onion_service(config)?
+        .ok_or("onion services disabled in config")?;
+
+    let onion_addr = loop {
+        if let Some(addr) = service.onion_address() {
+            break addr;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+    };
+    println!("your address:");
+    println!("{}", onion_addr.display_unredacted());
+    println!("share this with your peer.");
+
+    let mut stream_requests = handle_rend_requests(rend_requests);
+
+    if let Some(stream_request) = stream_requests.next().await {
+        let data_stream = stream_request.accept(Connected::new_empty()).await?;
+
+        let np = NoisePeer::accept(data_stream, PATTERN).await.map_err(|e| {
+            eprintln!("responder handshake failed: {}", e);
+            e
+        })?;
+
+        println!("peer connected. type to chat, ctrl+d to quit.");
+        chat_loop(np).await?;
+    }
+
+    Ok(())
+}
+
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn Error>> {
     let args: Vec<String> = env::args().collect();
-    if args.len() < 3 {
-        eprintln!(
-            "usage: {} (client|server|p2p) addr [peer_addr_for_p2p]",
-            args[0]
-        );
+    if args.len() < 2 {
+        eprintln!("usage: {} (initiate <onion_addr> | listen)", args[0]);
         std::process::exit(2);
     }
-    let mode = &args[1];
-    let addr = &args[2];
-    static PATTERN: &str = "Noise_NN_25519_ChaChaPoly_BLAKE2s";
 
-    match mode.as_str() {
-        "client" => run_client(addr, PATTERN)?,
-        "server" => run_server(addr, PATTERN)?,
-        "p2p" => {
-            if args.len() < 4 {
-                eprintln!("p2p mode requires local_addr peer_addr");
+    println!("bootstrapping tor...");
+    let tor =
+        TorClient::<PreferredRuntime>::create_bootstrapped(TorClientConfig::default()).await?;
+
+    match args[1].as_str() {
+        "initiate" => {
+            if args.len() < 3 {
+                eprintln!("usage: {} initiate <onion_addr>", args[0]);
                 std::process::exit(2);
             }
-            let peer = &args[3];
-            run_p2p(addr, peer, PATTERN)?;
+            run_initiator(&tor, &args[2]).await?;
+        }
+        "listen" => {
+            run_responder(&tor).await?;
         }
         _ => {
-            eprintln!("unknown mode: {}", mode);
+            eprintln!("unknown mode: {}", args[1]);
             std::process::exit(2);
         }
     }

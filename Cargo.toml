@@ -5,3 +5,11 @@ edition = "2024"
 
 [dependencies]
 snow = "0.10.0"
+tokio = { version = "1.49.0", features = ["net", "time", "rt-multi-thread", "macros", "io-util", "io-std"] }
+arti-client = { version = "0.39.0", features = ["onion-service-client", "onion-service-service", "experimental-api"] }
+tor-rtcompat = { version = "0.39.0", features = ["tokio"] }
+tor-hsservice = "0.39.0"
+futures = "0.3"
+tor-cell = "0.39.0"
+rusqlite = { version = "0.38.0", features = ["bundled"] }
+safelog = "0.7.2"
