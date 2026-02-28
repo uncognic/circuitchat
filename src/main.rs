@@ -11,6 +11,8 @@ use tor_hsservice::config::OnionServiceConfigBuilder;
 use tor_hsservice::handle_rend_requests;
 use tor_rtcompat::PreferredRuntime;
 
+use tor_hsservice::status::State;
+
 mod config;
 mod noise_peer;
 mod storage;
@@ -20,6 +22,8 @@ use noise_peer::NoisePeer;
 use storage::{MessageDirection, Storage};
 
 const PATTERN: &str = "Noise_NN_25519_ChaChaPoly_BLAKE2s";
+const CONNECT_MAX_RETRIES: u32 = 3;
+const CONNECT_RETRY_DELAY: std::time::Duration = std::time::Duration::from_secs(10);
 
 fn build_tor_config(persist: bool) -> Result<TorClientConfig, Box<dyn Error>> {
     if !persist {
@@ -131,19 +135,49 @@ async fn run_initiator(
     peer_onion: &str,
     storage: Option<Storage>,
 ) -> Result<(), Box<dyn Error>> {
-    println!("connecting to {}...", peer_onion);
     let mut prefs = StreamPrefs::new();
     prefs.connect_to_onion_services(arti_client::config::BoolOrAuto::Explicit(true));
-    let stream = tor
-        .connect_with_prefs((peer_onion, 9999u16), &prefs)
-        .await?;
 
-    let np = NoisePeer::connect(stream, PATTERN).await.map_err(|e| {
-        eprintln!("initiator handshake failed: {}", e);
-        e
-    })?;
+    let mut last_err: Box<dyn Error> = "connection failed".into();
 
-    chat_loop(np, storage.as_ref(), &format!("connected to peer {}", peer_onion)).await
+    for attempt in 1..=CONNECT_MAX_RETRIES {
+        if attempt == 1 {
+            println!("connecting to {}...", peer_onion);
+        } else {
+            println!(
+                "retrying ({}/{})... the peer may be offline or still publishing its descriptor",
+                attempt, CONNECT_MAX_RETRIES,
+            );
+        }
+
+        match tor.connect_with_prefs((peer_onion, 9999u16), &prefs).await {
+            Ok(stream) => {
+                let np = NoisePeer::connect(stream, PATTERN).await.map_err(|e| {
+                    eprintln!("initiator handshake failed: {}", e);
+                    e
+                })?;
+                return chat_loop(
+                    np,
+                    storage.as_ref(),
+                    &format!("connected to peer {}", peer_onion),
+                )
+                .await;
+            }
+            Err(e) => {
+                eprintln!("attempt {}/{} failed: {}", attempt, CONNECT_MAX_RETRIES, e);
+                last_err = e.into();
+                if attempt < CONNECT_MAX_RETRIES {
+                    tokio::time::sleep(CONNECT_RETRY_DELAY).await;
+                }
+            }
+        }
+    }
+
+    Err(format!(
+        "could not reach {} after {} attempts (is the peer online?): {}",
+        peer_onion, CONNECT_MAX_RETRIES, last_err
+    )
+    .into())
 }
 
 async fn run_responder(
@@ -167,7 +201,47 @@ async fn run_responder(
 
     let addr_str = format!("{}", onion_addr.display_unredacted());
     println!("your address: {}", addr_str);
-    println!("share this with your peer. waiting for connection...");
+
+    println!("publishing descriptor to the tor network...");
+    let mut status_events = service.status_events();
+    let publish_timeout = std::time::Duration::from_secs(120);
+    let published = tokio::time::timeout(publish_timeout, async {
+        if service.status().state().is_fully_reachable() {
+            return Ok(());
+        }
+        let mut last_state = None;
+        while let Some(status) = status_events.next().await {
+            let state = status.state();
+            match state {
+                State::Running | State::DegradedReachable => return Ok(()),
+                State::Broken => {
+                    return Err(format!(
+                        "onion service broken: {:?}",
+                        status.current_problem()
+                    ));
+                }
+                other => {
+                    if last_state != Some(other) {
+                        println!("- service state: {:?}", other);
+                        last_state = Some(other);
+                    }
+                }
+            }
+        }
+        Err("status stream ended unexpectedly".to_string())
+    })
+    .await;
+
+    match published {
+        Ok(Ok(())) => println!("descriptor published, service is reachable"),
+        Ok(Err(e)) => return Err(e.into()),
+        Err(_) => {
+            println!("warning: timed out waiting for descriptor publication");
+            println!("the service may not be reachable yet, continuing anyway");
+        }
+    }
+
+    println!("share your address with your peer. waiting for connection...");
 
     let mut stream_requests = handle_rend_requests(rend_requests);
 
@@ -205,7 +279,13 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let tor_config = build_tor_config(cfg.identity.persist)?;
 
     println!("bootstrapping tor...");
+    let start = std::time::Instant::now();
     let tor = TorClient::<PreferredRuntime>::create_bootstrapped(tor_config).await?;
+    let elapsed = start.elapsed();
+    println!("tor bootstrapped in {:.1}s", elapsed.as_secs_f64());
+    if elapsed.as_secs() < 2 {
+        println!("(note: tor bootstrap was fast, probably using cached tor state)");
+    }
 
     match args[1].as_str() {
         "initiate" => {
