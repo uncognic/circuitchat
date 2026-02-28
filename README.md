@@ -6,7 +6,7 @@ It creates ephemeral Tor onion services for real-time messaging with the [Noise 
 ## Features
 
 - Tor-first: Uses [Arti](https://gitlab.torproject.org/tpo/core/arti) to bootstrap a Tor client and expose onion services directly from the binary. No external Tor daemon required.
-- E2EE: Every session performs a full Noise `NN` handshake (`Noise_NN_25519_ChaChaPoly_BLAKE2s`) over the Tor stream, so traffic is encrypted independent of Tor's own transport layer.
+- E2EE: Every session performs a full Noise_NN handshake (`Noise_NN_25519_ChaChaPoly_BLAKE2s`) over the Tor stream, so traffic is encrypted independent of Tor's own transport layer.
 - TUI: Chat interface powered by [ratatui](https://github.com/ratatui/ratatui) with scrollable message history, timestamps, and a status bar.
 - Encrypted local history: Optionally persist chat messages in a local SQLite database, encrypted at rest with XChaCha20-Poly1305 (key derived from a passphrase via Argon2).
 - Zero-config defaults: Works out of the box with a single command, no setup required (other than installing Rust)
