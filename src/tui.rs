@@ -8,6 +8,7 @@ use ratatui::{
     text::{Line, Span},
     widgets::{Block, Borders, Paragraph, Wrap},
 };
+use std::io::{self, Write};
 
 pub struct ChatMessage {
     pub direction: MessageDirection,
@@ -63,11 +64,19 @@ impl App {
     }
 
     pub fn add_message(&mut self, direction: MessageDirection, content: String, timestamp: String) {
+        let should_bell = matches!(direction, MessageDirection::Received) && content.contains("@peer");
+
         self.messages.push(ChatMessage {
             direction,
             content,
             timestamp,
         });
+
+        if should_bell {
+            let _ = io::stdout().write_all(b"\x07");
+            let _ = io::stdout().flush();
+        }
+
         self.scroll_to_bottom();
     }
 
@@ -329,6 +338,13 @@ impl App {
         let my = area.y + (area.height.saturating_sub(mh)) / 2;
         let rect = Rect::new(mx, my, mw, mh);
 
+        let mut fill_lines: Vec<Line> = Vec::new();
+        for _ in 0..mh {
+            fill_lines.push(Line::from(" ".repeat(mw as usize)));
+        }
+        let filler = Paragraph::new(fill_lines).style(Style::default().bg(Color::Black));
+        frame.render_widget(filler, rect);
+
         let block = Block::default()
             .borders(Borders::ALL)
             .title(" Menu ")
@@ -348,8 +364,9 @@ impl App {
                 Style::default().add_modifier(Modifier::BOLD),
             )),
             Line::from(""),
-            Line::from("  S : Send a file"),
+            Line::from("  /send (s) : Send a file"),
             Line::from("  /cancel : Cancel incoming transfer"),
+            Line::from("  @peer : Sound the bell in peer's terminal"),
             Line::from(""),
             Line::from(Span::styled(
                 "Q / Enter to quit · Esc to close",
@@ -376,7 +393,12 @@ impl App {
         let mx = area.x + (area.width.saturating_sub(mw)) / 2;
         let my = area.y + (area.height.saturating_sub(mh)) / 2;
         let rect = Rect::new(mx, my, mw, mh);
-
+        let mut fill_lines: Vec<Line> = Vec::new();
+        for _ in 0..mh {
+            fill_lines.push(Line::from(" ".repeat(mw as usize)));
+        }
+        let filler = Paragraph::new(fill_lines).style(Style::default().bg(Color::Black));
+        frame.render_widget(filler, rect);
         let pct = t.pct();
         let bar_inner = (mw as usize).saturating_sub(8);
         let filled = if t.size == 0 {
