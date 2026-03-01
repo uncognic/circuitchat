@@ -8,6 +8,15 @@ const OFFER_TAG: u8 = b'F';
 const CHUNK_TAG: u8 = b'C';
 const DONE_TAG: u8 = b'D';
 const CANCEL_TAG: u8 = b'X';
+pub const MSG_FILE_ACCEPT: u8 = 0x05;
+pub const MSG_FILE_REJECT: u8 = 0x06;
+
+pub fn encode_accept() -> Vec<u8> {
+    vec![0x00, MSG_FILE_ACCEPT]
+}
+pub fn encode_reject() -> Vec<u8> {
+    vec![0x00, MSG_FILE_REJECT]
+}
 
 pub fn encode_offer(name: &str, size: u64) -> Vec<u8> {
     let mut msg = vec![0x00, OFFER_TAG];
@@ -35,6 +44,8 @@ pub fn encode_cancel() -> Vec<u8> {
 pub enum ParsedMessage {
     Text(String),
     FileOffer { name: String, size: u64 },
+    FileAccept,
+    FileReject,
     FileChunk(Vec<u8>),
     FileDone,
     FileCancel,
@@ -51,6 +62,8 @@ pub fn parse_message(data: &[u8]) -> ParsedMessage {
             CHUNK_TAG => ParsedMessage::FileChunk(data[2..].to_vec()),
             DONE_TAG => ParsedMessage::FileDone,
             CANCEL_TAG => ParsedMessage::FileCancel,
+            MSG_FILE_ACCEPT => ParsedMessage::FileAccept,
+            MSG_FILE_REJECT => ParsedMessage::FileReject,
             _ => ParsedMessage::Text(String::from_utf8_lossy(data).to_string()),
         }
     } else {

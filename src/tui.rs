@@ -42,6 +42,7 @@ pub struct App {
     pub show_menu: bool,
     pub send_progress: Option<TransferProgress>,
     pub recv_progress: Option<TransferProgress>,
+    pub pending_incoming_offer: Option<(String, u64)>,
 }
 
 impl App {
@@ -57,6 +58,7 @@ impl App {
             visible_height: 0,
             send_progress: None,
             recv_progress: None,
+            pending_incoming_offer: None,
         }
     }
 

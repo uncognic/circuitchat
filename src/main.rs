@@ -70,6 +70,7 @@ where
     let mut events = EventStream::new();
     let mut incoming_file: Option<file_transfer::IncomingFile> = None;
     let mut outgoing_file: Option<file_transfer::OutgoingFile> = None;
+    let mut pending_offer: Option<file_transfer::OutgoingFile> = None;
 
     loop {
         terminal.draw(|f| app.draw(f))?;
@@ -151,6 +152,7 @@ where
                 match result {
                     Ok(msg) => {
                         match file_transfer::parse_message(&msg) {
+
                             file_transfer::ParsedMessage::Text(content) => {
                                 app.add_message(
                                     MessageDirection::Received,
@@ -167,18 +169,13 @@ where
                                 let size_str = file_transfer::format_size(size);
                                 app.add_message(
                                     MessageDirection::Received,
-                                    format!("[file] receiving {} ({})", name, size_str),
+                                    format!(
+                                        "[file] peer wants to send {} ({}) — type /accept or /reject",
+                                        name, size_str
+                                    ),
                                     tui::now_timestamp(time_local, hour24),
                                 );
-                                match file_transfer::IncomingFile::begin(&name, size) {
-                                    Ok(inc) => {
-                                        app.set_recv_progress(name.clone(), size);
-                                        incoming_file = Some(inc);
-                                    }
-                                    Err(e) => {
-                                        app.status = format!("file receive error: {}", e);
-                                    }
-                                }
+                                app.pending_incoming_offer = Some((name, size));
                             }
                             file_transfer::ParsedMessage::FileChunk(data) => {
                                 if let Some(ref mut inc) = incoming_file {
@@ -229,6 +226,26 @@ where
                                     app.clear_recv_progress();
                                 }
                             }
+                            file_transfer::ParsedMessage::FileAccept => {
+                                if let Some(out) = pending_offer.take() {
+                                    app.add_message(
+                                        MessageDirection::Received,
+                                        format!("[file] peer accepted {}", out.name),
+                                        tui::now_timestamp(time_local, hour24),
+                                    );
+                                    app.set_send_progress(out.name.clone(), out.size);
+                                    outgoing_file = Some(out);
+                                }
+                            }
+                            file_transfer::ParsedMessage::FileReject => {
+                                if let Some(out) = pending_offer.take() {
+                                    app.add_message(
+                                        MessageDirection::Received,
+                                        format!("[file] peer rejected {}", out.name),
+                                        tui::now_timestamp(time_local, hour24),
+                                    );
+                                }
+                            }
                         }
                     }
                     Err(_) => {
@@ -254,14 +271,13 @@ where
                                             app.add_message(
                                                 MessageDirection::Sent,
                                                 format!(
-                                                    "[file] sending {} ({})",
+                                                    "[file] offered {} ({}) — waiting for peer to accept",
                                                     out.name,
                                                     file_transfer::format_size(out.size)
                                                 ),
                                                 tui::now_timestamp(time_local, hour24),
                                             );
-                                            app.set_send_progress(out.name.clone(), out.size);
-                                            outgoing_file = Some(out);
+                                            pending_offer = Some(out);
                                         }
                                     }
                                     Err(e) => {
@@ -280,6 +296,47 @@ where
                                     app.clear_recv_progress();
                                 } else {
                                     app.status = "no active incoming transfer".to_string();
+                                }
+                            } else if text == "/accept" {
+                                if incoming_file.is_some() {
+                                    app.status = "transfer already in progress".to_string();
+                                } else if let Some(ref offer) = app.pending_incoming_offer {
+                                    let name = offer.0.clone();
+                                    let size = offer.1;
+                                    if let Err(e) = np.send(&file_transfer::encode_accept()).await {
+                                        app.status = format!("send failed: {}", e);
+                                    } else {
+                                        match file_transfer::IncomingFile::begin(&name, size) {
+                                            Ok(inc) => {
+                                                app.set_recv_progress(name.clone(), size);
+                                                incoming_file = Some(inc);
+                                                app.pending_incoming_offer = None;
+                                                app.add_message(
+                                                    MessageDirection::Sent,
+                                                    format!("[file] accepted {}", name),
+                                                    tui::now_timestamp(time_local, hour24),
+                                                );
+                                            }
+                                            Err(e) => {
+                                                app.status = format!("file receive error: {}", e);
+                                            }
+                                        }
+                                    }
+                                } else {
+                                    app.status = "no pending file offer".to_string();
+                                }
+                            } else if text == "/reject" {
+                                if let Some(ref offer) = app.pending_incoming_offer {
+                                    let name = offer.0.clone();
+                                    let _ = np.send(&file_transfer::encode_reject()).await;
+                                    app.pending_incoming_offer = None;
+                                    app.add_message(
+                                        MessageDirection::Sent,
+                                        format!("[file] rejected {}", name),
+                                        tui::now_timestamp(time_local, hour24),
+                                    );
+                                } else {
+                                    app.status = "no pending file offer".to_string();
                                 }
                             } else {
                                 let bytes = text.as_bytes().to_vec();
