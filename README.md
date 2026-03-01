@@ -13,13 +13,6 @@ It creates ephemeral Tor onion services for real-time messaging with the [Noise 
 - Zero-config defaults: Works out of the box with a single command, no setup required (other than installing Rust)
 
 ## Usage
-
-1. Peer A runs `circuitchat listen`, which bootstraps Tor and publishes a temporary onion address.
-2. Peer A shares that onion address with Peer B through any out-of-band channel.
-3. Peer B runs `circuitchat initiate <onion_address>`, connects over Tor, and both peers perform a Noise handshake.
-4. A chat session begins with E2EE messages sent directly over the Tor stream.
-
-## Usage
 ### Listen for a connection
 ```sh
 circuitchat listen
