@@ -67,8 +67,8 @@ impl Default for Config {
                 password: String::new(),
             },
             privacy: PrivacyConfig {
-                typing_status: true,
-                read_receipts: true
+                typing_status: false,
+                read_receipts: false,
             },
         }
     }
