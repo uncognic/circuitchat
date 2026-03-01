@@ -12,7 +12,7 @@ It creates ephemeral Tor onion services for real-time messaging with the [Noise 
 - Encrypted local history: Optionally persist chat messages in a local SQLite database, encrypted at rest with XChaCha20-Poly1305 (key derived from a passphrase via Argon2).
 - Zero-config defaults: Works out of the box with a single command, no setup required (other than installing Rust)
 
-## How it works
+## Usage
 
 1. Peer A runs `circuitchat listen`, which bootstraps Tor and publishes a temporary onion address.
 2. Peer A shares that onion address with Peer B through any out-of-band channel.
