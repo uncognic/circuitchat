@@ -512,21 +512,38 @@ async fn run_responder(
 
     let mut stream_requests = handle_rend_requests(rend_requests);
 
-    if let Some(stream_request) = stream_requests.next().await {
-        let data_stream = stream_request.accept(Connected::new_empty()).await?;
+    while let Some(stream_request) = stream_requests.next().await {
+        let data_stream = match stream_request.accept(Connected::new_empty()).await {
+            Ok(s) => s,
+            Err(e) => {
+                eprintln!("failed to accept incoming connection: {}", e);
+                continue;
+            }
+        };
 
-        let mut np = NoisePeer::accept(data_stream, PATTERN).await.map_err(|e| {
-            eprintln!("responder handshake failed: {}", e);
-            e
-        })?;
+        let mut np = match NoisePeer::accept(data_stream, PATTERN).await {
+            Ok(n) => n,
+            Err(e) => {
+                eprintln!("responder handshake failed: {}", e);
+                continue;
+            }
+        };
         let auth_pw = if auth_enabled {
             Some(password.clone())
         } else {
             None
         };
-        np.auth_responder(auth_pw.as_deref()).await?;
+        if let Err(e) = np.auth_responder(auth_pw.as_deref()).await {
+            eprintln!("authentication failed: {}", e);
+            continue;
+        }
         let status = format!("connected | you are {}", addr_str);
-        chat_loop(np, storage.as_ref(), &status, time_local, hour24).await?;
+
+        if let Err(e) = chat_loop(np, storage.as_ref(), &status, time_local, hour24).await {
+            eprintln!("chat loop ended with error: {}", e);
+        } else {
+            println!("peer disconnected, waiting for next connection...");
+        }
     }
 
     Ok(())
