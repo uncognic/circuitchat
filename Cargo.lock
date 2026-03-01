@@ -613,12 +613,15 @@ dependencies = [
  "chrono",
  "crossterm",
  "futures",
+ "hmac",
  "rand 0.8.5",
  "ratatui",
  "rpassword",
  "rusqlite",
  "safelog",
  "serde",
+ "sha2",
+ "sha256",
  "snow",
  "tokio",
  "toml 1.0.3+spec-1.1.0",
@@ -3944,6 +3947,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "sha256"
+version = "1.6.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f880fc8562bdeb709793f00eb42a2ad0e672c4f883bbe59122b926eca935c8f6"
+dependencies = [
+ "async-trait",
+ "bytes",
+ "hex",
+ "sha2",
+ "tokio",
+]
+
+[[package]]
 name = "sha3"
 version = "0.10.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4281,7 +4297,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "82a72c767771b47409d2345987fda8628641887d5466101319899796367354a0"
 dependencies = [
  "fastrand",
- "getrandom 0.3.4",
+ "getrandom 0.4.1",
  "once_cell",
  "rustix",
  "windows-sys 0.61.2",

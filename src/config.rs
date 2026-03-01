@@ -9,8 +9,14 @@ pub struct Config {
     pub history: HistoryConfig,
     #[serde(default)]
     pub time: TimeConfig,
+    #[serde(default)]
+    pub auth: AuthConfig,
 }
-
+#[derive(Debug, Serialize, Deserialize)]
+pub struct AuthConfig {
+    pub enabled: bool,
+    pub password: String,
+}
 #[derive(Debug, Serialize, Deserialize)]
 pub struct IdentityConfig {
     pub persist: bool,
@@ -28,7 +34,14 @@ pub struct TimeConfig {
     pub hour24: bool,
     pub local: bool,
 }
-
+impl Default for AuthConfig {
+    fn default() -> Self {
+        AuthConfig {
+            enabled: false,
+            password: String::new(),
+        }
+    }
+}
 impl Default for Config {
     fn default() -> Self {
         Config {
@@ -41,9 +54,15 @@ impl Default for Config {
                 hour24: true,
                 local: false,
             },
+            auth: AuthConfig {
+                enabled: false,
+                password: String::new(),
+            },
         }
     }
 }
+
+
 
 pub fn config_path() -> Result<PathBuf, Box<dyn Error>> {
     let exe_dir = std::env::current_exe()?
@@ -59,18 +78,27 @@ pub fn load_or_create() -> Result<Config, Box<dyn Error>> {
     if path.exists() {
         let contents = std::fs::read_to_string(&path)?;
         let config: Config = toml::from_str(&contents)?;
-
+        let raw: toml::Value = toml::from_str(&contents)?;
         if config.history.save && !config.identity.persist {
             eprintln!("warning: history.save = true has no effect without identity.persist = true");
         }
-        if !contents.contains("[time]") {
-            let new_contents = toml::to_string_pretty(&config)?;
-            std::fs::write(&path, new_contents)?;
-            println!(
-                "updated config with default [time] section at {}",
-                path.display()
-            );
+
+        let mut updated = false;
+
+        if raw.get("time").is_none() {
+            updated = true;
         }
+
+        if raw.get("auth").is_none() {
+            updated = true;
+        }
+
+        if updated {
+            let contents = toml::to_string_pretty(&config)?;
+            std::fs::write(&path, contents)?;
+            println!("updated config with new fields at {}", path.display());
+        }
+
 
         Ok(config)
     } else {
@@ -107,4 +135,17 @@ pub fn resolve_passphrase(config: &Config) -> Result<Option<String>, Box<dyn Err
     }
 
     Ok(Some(passphrase))
+}
+pub fn resolve_auth_password(config: &Config) -> Result<Option<String>, Box<dyn Error>> {
+    if !config.auth.enabled {
+        return Ok(None);
+    }
+    if !config.auth.password.is_empty() {
+        return Ok(Some(config.auth.password.clone()));
+    }
+    let password = rpassword::prompt_password("enter session password: ")?;
+    if password.is_empty() {
+        return Err("session password cannot be empty when auth is enabled".into());
+    }
+    Ok(Some(password))
 }

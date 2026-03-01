@@ -1,3 +1,6 @@
+use argon2::Argon2;
+use hmac::{Hmac, Mac};
+use sha2::Sha256;
 use std::error::Error;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 
@@ -89,6 +92,49 @@ impl<T: AsyncRead + AsyncWrite + Unpin> NoisePeer<T> {
         pt.truncate(len);
         Ok(pt)
     }
+
+    pub async fn auth_responder(&mut self, password: Option<&str>) -> Result<(), Box<dyn Error>> {
+        if let Some(pw) = password {
+            send_frame(&mut self.stream, &[0x01]).await?;
+            let their_proof = recv_frame(&mut self.stream).await?;
+            if their_proof != derive_proof(pw, "circuitchat-auth-initiator") {
+                send_frame(&mut self.stream, &[0xFF]).await?;
+                return Err("peer failed authentication".into());
+            }
+            send_frame(
+                &mut self.stream,
+                &derive_proof(pw, "circuitchat-auth-responder"),
+            )
+            .await?;
+        } else {
+            send_frame(&mut self.stream, &[0x00]).await?;
+        }
+        Ok(())
+    }
+
+    pub async fn auth_initiator(&mut self, password: Option<&str>) -> Result<(), Box<dyn Error>> {
+        let flag = recv_frame(&mut self.stream).await?;
+        match flag.first() {
+            Some(&0x00) => Ok(()),
+            Some(&0x01) => {
+                let pw = match password {
+                    Some(p) => p.to_string(),
+                    None => rpassword::prompt_password("peer requires a password: ")?,
+                };
+                let our_proof = derive_proof(&pw, "circuitchat-auth-initiator");
+                send_frame(&mut self.stream, &our_proof).await?;
+                let their_proof = recv_frame(&mut self.stream).await?;
+                if their_proof == [0xFF] {
+                    return Err("authentication rejected by peer".into());
+                }
+                if their_proof != derive_proof(&pw, "circuitchat-auth-responder") {
+                    return Err("peer failed authentication".into());
+                }
+                Ok(())
+            }
+            _ => Err("unexpected auth frame".into()),
+        }
+    }
 }
 
 async fn send_frame<W: AsyncWrite + Unpin>(
@@ -112,4 +158,15 @@ async fn recv_frame<R: AsyncRead + Unpin>(stream: &mut R) -> Result<Vec<u8>, Box
     let mut buf = vec![0u8; len];
     stream.read_exact(&mut buf).await?;
     Ok(buf)
+}
+fn derive_proof(password: &str, label: &str) -> Vec<u8> {
+    let salt = b"circuitchat-v1-auth-salt";
+    let mut key = [0u8; 32];
+    Argon2::default()
+        .hash_password_into(password.as_bytes(), salt, &mut key)
+        .expect("argon2 failed");
+
+    let mut mac = Hmac::<Sha256>::new_from_slice(&key).unwrap();
+    mac.update(label.as_bytes());
+    mac.finalize().into_bytes().to_vec()
 }

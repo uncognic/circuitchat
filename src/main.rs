@@ -322,6 +322,8 @@ async fn run_initiator(
     storage: Option<Storage>,
     time_local: bool,
     hour24: bool,
+    auth_enabled: bool,
+    password: String,
 ) -> Result<(), Box<dyn Error>> {
     let mut prefs = StreamPrefs::new();
     prefs.connect_to_onion_services(arti_client::config::BoolOrAuto::Explicit(true));
@@ -343,10 +345,16 @@ async fn run_initiator(
         match tor.connect_with_prefs((peer_onion, 9999u16), &prefs).await {
             Ok(stream) => {
                 println!("connected in {:.1}s", start.elapsed().as_secs_f64());
-                let np = NoisePeer::connect(stream, PATTERN).await.map_err(|e| {
+                let mut np = NoisePeer::connect(stream, PATTERN).await.map_err(|e| {
                     eprintln!("initiator handshake failed: {}", e);
                     e
                 })?;
+                let auth_pw = if auth_enabled {
+                    Some(password.clone())
+                } else {
+                    None
+                };
+                np.auth_initiator(auth_pw.as_deref()).await?;
                 return chat_loop(
                     np,
                     storage.as_ref(),
@@ -374,6 +382,8 @@ async fn run_responder(
     storage: Option<Storage>,
     time_local: bool,
     hour24: bool,
+    auth_enabled: bool,
+    password: String,
 ) -> Result<(), Box<dyn Error>> {
     let config = OnionServiceConfigBuilder::default()
         .nickname("circuitchat".to_owned().try_into()?)
@@ -448,11 +458,16 @@ async fn run_responder(
     if let Some(stream_request) = stream_requests.next().await {
         let data_stream = stream_request.accept(Connected::new_empty()).await?;
 
-        let np = NoisePeer::accept(data_stream, PATTERN).await.map_err(|e| {
+        let mut np = NoisePeer::accept(data_stream, PATTERN).await.map_err(|e| {
             eprintln!("responder handshake failed: {}", e);
             e
         })?;
-
+        let auth_pw = if auth_enabled {
+            Some(password.clone())
+        } else {
+            None
+        };
+        np.auth_responder(auth_pw.as_deref()).await?;
         let status = format!("connected | you are {}", addr_str);
         chat_loop(np, storage.as_ref(), &status, time_local, hour24).await?;
     }
@@ -498,12 +513,16 @@ async fn main() -> Result<(), Box<dyn Error>> {
     }
 
     if args.len() < 2 {
-        eprintln!("usage: {} (initiate <onion_addr> | listen) [--reset]", args[0]);
+        eprintln!(
+            "usage: {} (initiate <onion_addr> | listen) [--reset]",
+            args[0]
+        );
         std::process::exit(2);
     }
 
     let cfg = config::load_or_create()?;
     let passphrase = config::resolve_passphrase(&cfg)?;
+    let auth_password = config::resolve_auth_password(&cfg)?;
 
     let storage = match passphrase {
         Some(ref p) if cfg.identity.persist => Some(Storage::open(p)?),
@@ -527,10 +546,27 @@ async fn main() -> Result<(), Box<dyn Error>> {
                 eprintln!("usage: {} initiate <onion_addr>", args[0]);
                 std::process::exit(2);
             }
-            run_initiator(&tor, &args[2], storage, cfg.time.local, cfg.time.hour24).await?;
+            run_initiator(
+                &tor,
+                &args[2],
+                storage,
+                cfg.time.local,
+                cfg.time.hour24,
+                cfg.auth.enabled,
+                auth_password.unwrap_or_default(),
+            )
+            .await?;
         }
         "listen" => {
-            run_responder(&tor, storage, cfg.time.local, cfg.time.hour24).await?;
+            run_responder(
+                &tor,
+                storage,
+                cfg.time.local,
+                cfg.time.hour24,
+                cfg.auth.enabled,
+                auth_password.unwrap_or_default(),
+            )
+            .await?;
         }
         _ => {
             eprintln!("unknown mode: {}", args[1]);
