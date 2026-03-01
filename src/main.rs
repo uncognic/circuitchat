@@ -48,6 +48,10 @@ async fn chat_loop<T>(
     initial_status: &str,
     time_local: bool,
     hour24: bool,
+    show_seconds: bool,
+    show_tz: bool,
+    typing_indicators: bool,
+    delivery_receipts: bool,
 ) -> Result<(), Box<dyn Error>>
 where
     T: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send + Sized + 'static,
@@ -61,7 +65,7 @@ where
                 app.add_message(
                     msg.direction,
                     String::from_utf8_lossy(&msg.content).to_string(),
-                    tui::format_timestamp(msg.timestamp, time_local, hour24),
+                    tui::format_timestamp(msg.timestamp, time_local, hour24, show_tz, show_seconds),
                 );
             }
         }
@@ -71,6 +75,7 @@ where
     let mut incoming_file: Option<file_transfer::IncomingFile> = None;
     let mut outgoing_file: Option<file_transfer::OutgoingFile> = None;
     let mut pending_offer: Option<file_transfer::OutgoingFile> = None;
+    let mut last_input_empty = true;
 
     loop {
         terminal.draw(|f| app.draw(f))?;
@@ -98,7 +103,7 @@ where
                 app.add_message(
                     MessageDirection::Sent,
                     format!("[file] cancelled sending {}", out.name),
-                    tui::now_timestamp(time_local, hour24),
+                    tui::now_timestamp(time_local, hour24, show_tz, show_seconds),
                 );
                 app.clear_send_progress();
                 continue;
@@ -111,7 +116,7 @@ where
                         app.add_message(
                             MessageDirection::Sent,
                             format!("[file] send error: {}", e),
-                            tui::now_timestamp(time_local, hour24),
+                            tui::now_timestamp(time_local, hour24, show_tz, show_seconds),
                         );
                         app.clear_send_progress();
                         outgoing_file = None;
@@ -130,7 +135,7 @@ where
                             out.name,
                             file_transfer::format_size(out.size)
                         ),
-                        tui::now_timestamp(time_local, hour24),
+                        tui::now_timestamp(time_local, hour24, show_tz, show_seconds),
                     );
                     app.clear_send_progress();
                 }
@@ -138,7 +143,7 @@ where
                     app.add_message(
                         MessageDirection::Sent,
                         format!("[file] read error: {}", e),
-                        tui::now_timestamp(time_local, hour24),
+                        tui::now_timestamp(time_local, hour24, show_tz, show_seconds),
                     );
                     app.clear_send_progress();
                     outgoing_file = None;
@@ -157,12 +162,19 @@ where
                                 app.add_message(
                                     MessageDirection::Received,
                                     content,
-                                    tui::now_timestamp(time_local, hour24),
+                                    tui::now_timestamp(time_local, hour24, show_tz, show_seconds),
                                 );
                                 if let Some(s) = storage {
                                     if let Err(e) = s.save_message(MessageDirection::Received, &msg) {
                                         app.status = format!("save error: {}", e);
                                     }
+                                }
+                                if delivery_receipts {
+                                    let _ = np.send(&file_transfer::encode_delivered()).await;
+                                }
+                                if typing_indicators {
+                                    app.peer_typing = false;
+                                    app.status = app.status.replace(" | peer is typing...", "");
                                 }
                             }
                             file_transfer::ParsedMessage::FileOffer { name, size } => {
@@ -173,7 +185,7 @@ where
                                         "[file] peer wants to send {} ({}) — type /accept or /reject",
                                         name, size_str
                                     ),
-                                    tui::now_timestamp(time_local, hour24),
+                                    tui::now_timestamp(time_local, hour24, show_tz, show_seconds),
                                 );
                                 app.pending_incoming_offer = Some((name, size));
                             }
@@ -202,7 +214,7 @@ where
                                                     file_transfer::format_size(size),
                                                     path.display()
                                                 ),
-                                                tui::now_timestamp(time_local, hour24),
+                                                tui::now_timestamp(time_local, hour24, show_tz, show_seconds),
                                             );
                                             app.status = "file received".to_string();
                                             app.clear_recv_progress();
@@ -217,10 +229,10 @@ where
                             file_transfer::ParsedMessage::FileCancel => {
                                 if let Some(inc) = incoming_file.take() {
                                     inc.cancel();
-                                    app.add_message(
+                                        app.add_message(
                                         MessageDirection::Received,
                                         "[file] peer cancelled the transfer".to_string(),
-                                        tui::now_timestamp(time_local, hour24),
+                                        tui::now_timestamp(time_local, hour24, show_tz, show_seconds),
                                     );
                                     app.status = "transfer cancelled by peer".to_string();
                                     app.clear_recv_progress();
@@ -231,7 +243,7 @@ where
                                     app.add_message(
                                         MessageDirection::Received,
                                         format!("[file] peer accepted {}", out.name),
-                                        tui::now_timestamp(time_local, hour24),
+                                        tui::now_timestamp(time_local, hour24, show_tz, show_seconds),
                                     );
                                     app.set_send_progress(out.name.clone(), out.size);
                                     outgoing_file = Some(out);
@@ -242,8 +254,27 @@ where
                                     app.add_message(
                                         MessageDirection::Received,
                                         format!("[file] peer rejected {}", out.name),
-                                        tui::now_timestamp(time_local, hour24),
+                                        tui::now_timestamp(time_local, hour24, show_tz, show_seconds),
                                     );
+                                }
+                            }
+                            file_transfer::ParsedMessage::TypingStart => {
+                                if typing_indicators {
+                                    app.peer_typing = true;
+                                    let current = app.status.trim_end_matches(" | peer is typing...").to_string();
+                                    app.status = format!("{} | peer is typing...", current);
+                                }
+                            }
+                            file_transfer::ParsedMessage::TypingStop => {
+                                if typing_indicators {
+                                    app.peer_typing = false;
+                                    app.status = app.status.replace(" | peer is typing...", "");
+                                }
+                            }
+                            file_transfer::ParsedMessage::Delivered => {
+                                if delivery_receipts && app.pending_delivery > 0 {
+                                    app.pending_delivery -= 1;
+                                    app.mark_last_sent_delivered();
                                 }
                             }
                         }
@@ -258,7 +289,17 @@ where
             event = events.next() => {
                 match event {
                     Some(Ok(Event::Key(key))) => {
-                        if let Some(text) = app.handle_key(key) {
+                        let submitted = app.handle_key(key);
+                        if typing_indicators {
+                                let now_empty = app.input.is_empty();
+                                if last_input_empty && !now_empty {
+                                    let _ = np.send(&file_transfer::encode_typing_start()).await;
+                                } else if !last_input_empty && now_empty {
+                                    let _ = np.send(&file_transfer::encode_typing_stop()).await;
+                                }
+                                last_input_empty = now_empty;
+                            }
+                        if let Some(text) = submitted {
                             if text.starts_with("/send ") {
                                 let path = text[6..].trim();
                                 match file_transfer::OutgoingFile::open(path) {
@@ -275,7 +316,7 @@ where
                                                     out.name,
                                                     file_transfer::format_size(out.size)
                                                 ),
-                                                tui::now_timestamp(time_local, hour24),
+                                                tui::now_timestamp(time_local, hour24, show_tz, show_seconds),
                                             );
                                             pending_offer = Some(out);
                                         }
@@ -287,11 +328,11 @@ where
                             } else if text == "/cancel" {
                                 if let Some(inc) = incoming_file.take() {
                                     inc.cancel();
-                                    app.add_message(
-                                        MessageDirection::Sent,
-                                        "[file] cancelled receiving".to_string(),
-                                        tui::now_timestamp(time_local, hour24),
-                                    );
+                                        app.add_message(
+                                            MessageDirection::Sent,
+                                            "[file] cancelled receiving".to_string(),
+                                            tui::now_timestamp(time_local, hour24, show_tz, show_seconds),
+                                        );
                                     app.status = "cancelled incoming transfer".to_string();
                                     app.clear_recv_progress();
                                 } else {
@@ -314,7 +355,7 @@ where
                                                 app.add_message(
                                                     MessageDirection::Sent,
                                                     format!("[file] accepted {}", name),
-                                                    tui::now_timestamp(time_local, hour24),
+                                                    tui::now_timestamp(time_local, hour24, show_tz, show_seconds),
                                                 );
                                             }
                                             Err(e) => {
@@ -333,7 +374,7 @@ where
                                     app.add_message(
                                         MessageDirection::Sent,
                                         format!("[file] rejected {}", name),
-                                        tui::now_timestamp(time_local, hour24),
+                                        tui::now_timestamp(time_local, hour24, show_tz, show_seconds),
                                     );
                                 } else {
                                     app.status = "no pending file offer".to_string();
@@ -348,8 +389,15 @@ where
                                 app.add_message(
                                     MessageDirection::Sent,
                                     text,
-                                    tui::now_timestamp(time_local, hour24),
+                                    tui::now_timestamp(time_local, hour24, show_tz, show_seconds),
                                 );
+                                if typing_indicators {
+                                    let _ = np.send(&file_transfer::encode_typing_stop()).await;
+                                    last_input_empty = true;
+                                }
+                                if delivery_receipts {
+                                    app.pending_delivery += 1;
+                                }
                                 if let Some(s) = storage {
                                     if let Err(e) = s.save_message(MessageDirection::Sent, &bytes) {
                                         app.status = format!("save error: {}", e);
@@ -379,8 +427,12 @@ async fn run_initiator(
     storage: Option<Storage>,
     time_local: bool,
     hour24: bool,
+    show_seconds: bool,
+    show_tz: bool,
     auth_enabled: bool,
     password: String,
+    typing_indicators: bool,
+    delivery_receipts: bool,
 ) -> Result<(), Box<dyn Error>> {
     let mut prefs = StreamPrefs::new();
     prefs.connect_to_onion_services(arti_client::config::BoolOrAuto::Explicit(true));
@@ -418,6 +470,10 @@ async fn run_initiator(
                     &format!("connected to peer {}", peer_onion),
                     time_local,
                     hour24,
+                    show_seconds,
+                    show_tz,
+                    typing_indicators,
+                    delivery_receipts,
                 )
                 .await;
             }
@@ -439,8 +495,12 @@ async fn run_responder(
     storage: Option<Storage>,
     time_local: bool,
     hour24: bool,
+    show_seconds: bool,
+    show_tz: bool,
     auth_enabled: bool,
     password: String,
+    typing_indicators: bool,
+    delivery_receipts: bool,
 ) -> Result<(), Box<dyn Error>> {
     let config = OnionServiceConfigBuilder::default()
         .nickname("circuitchat".to_owned().try_into()?)
@@ -539,7 +599,19 @@ async fn run_responder(
         }
         let status = format!("connected | you are {}", addr_str);
 
-        if let Err(e) = chat_loop(np, storage.as_ref(), &status, time_local, hour24).await {
+        if let Err(e) = chat_loop(
+            np,
+            storage.as_ref(),
+            &status,
+            time_local,
+            hour24,
+            show_seconds,
+            show_tz,
+            typing_indicators,
+            delivery_receipts,
+        )
+        .await
+        {
             eprintln!("chat loop ended with error: {}", e);
         } else {
             println!("peer disconnected, waiting for next connection...");
@@ -626,8 +698,12 @@ async fn main() -> Result<(), Box<dyn Error>> {
                 storage,
                 cfg.time.local,
                 cfg.time.hour24,
+                cfg.time.show_seconds,
+                cfg.time.show_tz,
                 cfg.auth.enabled,
                 auth_password.unwrap_or_default(),
+                cfg.privacy.typing_status,
+                cfg.privacy.read_receipts,
             )
             .await?;
         }
@@ -637,8 +713,12 @@ async fn main() -> Result<(), Box<dyn Error>> {
                 storage,
                 cfg.time.local,
                 cfg.time.hour24,
+                cfg.time.show_seconds,
+                cfg.time.show_tz,
                 cfg.auth.enabled,
                 auth_password.unwrap_or_default(),
+                cfg.privacy.typing_status,
+                cfg.privacy.read_receipts,
             )
             .await?;
         }

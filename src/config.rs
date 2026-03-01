@@ -7,10 +7,14 @@ use std::path::PathBuf;
 pub struct Config {
     pub identity: IdentityConfig,
     pub history: HistoryConfig,
-    #[serde(default)]
     pub time: TimeConfig,
-    #[serde(default)]
     pub auth: AuthConfig,
+    pub privacy: PrivacyConfig,
+}
+#[derive(Debug, Serialize, Deserialize)]
+pub struct PrivacyConfig {
+    pub typing_status: bool,
+    pub read_receipts: bool,
 }
 #[derive(Debug, Serialize, Deserialize)]
 pub struct AuthConfig {
@@ -33,6 +37,8 @@ pub struct TimeConfig {
     #[serde(rename = "24h")]
     pub hour24: bool,
     pub local: bool,
+    pub show_tz: bool,
+    pub show_seconds: bool,
 }
 impl Default for AuthConfig {
     fn default() -> Self {
@@ -53,10 +59,16 @@ impl Default for Config {
             time: TimeConfig {
                 hour24: true,
                 local: false,
+                show_tz: false,
+                show_seconds: false,
             },
             auth: AuthConfig {
                 enabled: false,
                 password: String::new(),
+            },
+            privacy: PrivacyConfig {
+                typing_status: true,
+                read_receipts: true
             },
         }
     }

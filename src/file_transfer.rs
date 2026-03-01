@@ -10,7 +10,19 @@ const DONE_TAG: u8 = b'D';
 const CANCEL_TAG: u8 = b'X';
 pub const MSG_FILE_ACCEPT: u8 = 0x05;
 pub const MSG_FILE_REJECT: u8 = 0x06;
+pub const MSG_TYPING_START: u8 = 0x07;
+pub const MSG_TYPING_STOP: u8 = 0x08;
+pub const MSG_DELIVERED: u8 = 0x09;
 
+pub fn encode_typing_start() -> Vec<u8> {
+    vec![0x00, MSG_TYPING_START]
+}
+pub fn encode_typing_stop() -> Vec<u8> {
+    vec![0x00, MSG_TYPING_STOP]
+}
+pub fn encode_delivered() -> Vec<u8> {
+    vec![0x00, MSG_DELIVERED]
+}
 pub fn encode_accept() -> Vec<u8> {
     vec![0x00, MSG_FILE_ACCEPT]
 }
@@ -49,6 +61,9 @@ pub enum ParsedMessage {
     FileChunk(Vec<u8>),
     FileDone,
     FileCancel,
+    TypingStart,
+    TypingStop,
+    Delivered,
 }
 
 pub fn parse_message(data: &[u8]) -> ParsedMessage {
@@ -64,6 +79,9 @@ pub fn parse_message(data: &[u8]) -> ParsedMessage {
             CANCEL_TAG => ParsedMessage::FileCancel,
             MSG_FILE_ACCEPT => ParsedMessage::FileAccept,
             MSG_FILE_REJECT => ParsedMessage::FileReject,
+            MSG_TYPING_START => ParsedMessage::TypingStart,
+            MSG_TYPING_STOP => ParsedMessage::TypingStop,
+            MSG_DELIVERED => ParsedMessage::Delivered,
             _ => ParsedMessage::Text(String::from_utf8_lossy(data).to_string()),
         }
     } else {

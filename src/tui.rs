@@ -9,7 +9,6 @@ use ratatui::{
     widgets::{Block, Borders, Paragraph, Wrap},
 };
 use std::io::{self, Write};
-
 pub struct ChatMessage {
     pub direction: MessageDirection,
     pub content: String,
@@ -44,6 +43,8 @@ pub struct App {
     pub send_progress: Option<TransferProgress>,
     pub recv_progress: Option<TransferProgress>,
     pub pending_incoming_offer: Option<(String, u64)>,
+    pub peer_typing: bool,
+    pub pending_delivery: usize,
 }
 
 impl App {
@@ -60,11 +61,14 @@ impl App {
             send_progress: None,
             recv_progress: None,
             pending_incoming_offer: None,
+            peer_typing: false,
+            pending_delivery: 0,
         }
     }
 
     pub fn add_message(&mut self, direction: MessageDirection, content: String, timestamp: String) {
-        let should_bell = matches!(direction, MessageDirection::Received) && content.contains("@peer");
+        let should_bell =
+            matches!(direction, MessageDirection::Received) && content.contains("@peer");
 
         self.messages.push(ChatMessage {
             direction,
@@ -283,7 +287,7 @@ impl App {
 
         let block = Block::default()
             .borders(Borders::ALL)
-            .title(" circuitchat ")
+            .title(format!("circuitchat v{}", env!("CARGO_PKG_VERSION")))
             .title_bottom(Line::from(format!(" {} ", self.status)).right_aligned())
             .border_style(Style::default().fg(Color::DarkGray));
 
@@ -324,7 +328,7 @@ impl App {
             let rect = Rect::new(x, area.y, w, 1);
             let p = Paragraph::new(Line::from(Span::styled(
                 label,
-                Style::default().add_modifier(Modifier::BOLD),
+                Style::default(),
             )));
             frame.render_widget(p, rect);
         }
@@ -466,36 +470,86 @@ impl App {
         let chars_before = self.input[..self.cursor_position].chars().count();
         frame.set_cursor_position((area.x + 1 + 2 + chars_before as u16, area.y + 1));
     }
+    pub fn mark_last_sent_delivered(&mut self) {
+        for msg in self.messages.iter_mut().rev() {
+            if msg.direction == MessageDirection::Sent && !msg.content.ends_with(" ✓") {
+                msg.content.push_str(" ✓");
+                break;
+            }
+        }
+    }
 }
 
-pub fn format_timestamp(unix_secs: i64, use_local: bool, hour24: bool) -> String {
+pub fn format_timestamp(
+    unix_secs: i64,
+    use_local: bool,
+    hour24: bool,
+    show_tz: bool,
+    show_seconds: bool,
+) -> String {
     if use_local {
         let dt = Local
             .timestamp_opt(unix_secs, 0)
             .single()
             .unwrap_or_else(|| Local::now());
-        let tz = dt.format("%Z").to_string().to_lowercase();
-        let fmt = if hour24 { "%H:%M:%S" } else { "%I:%M:%S %p" };
-        format!("{} {}", tz, dt.format(fmt))
+        let fmt = if show_seconds {
+            if hour24 { "%H:%M:%S" } else { "%I:%M:%S %p" }
+        } else {
+            if hour24 { "%H:%M" } else { "%I:%M %p" }
+        };
+        let time_part = dt.format(fmt).to_string();
+        if show_tz {
+            let tz = dt.format("%Z").to_string().to_lowercase();
+            format!("{} {}", tz, time_part)
+        } else {
+            time_part
+        }
     } else {
         let dt = Utc
             .timestamp_opt(unix_secs, 0)
             .single()
             .unwrap_or_else(|| Utc::now());
-        let fmt = if hour24 { "%H:%M:%S" } else { "%I:%M:%S %p" };
-        format!("utc {}", dt.format(fmt))
+        let fmt = if show_seconds {
+            if hour24 { "%H:%M:%S" } else { "%I:%M:%S %p" }
+        } else {
+            if hour24 { "%H:%M" } else { "%I:%M %p" }
+        };
+        let time_part = dt.format(fmt).to_string();
+        if show_tz {
+            format!("utc {}", time_part)
+        } else {
+            time_part
+        }
     }
 }
 
-pub fn now_timestamp(use_local: bool, hour24: bool) -> String {
+pub fn now_timestamp(use_local: bool, hour24: bool, show_tz: bool, show_seconds: bool) -> String {
     if use_local {
         let dt = Local::now();
-        let tz = dt.format("utc%Z").to_string().to_lowercase();
-        let fmt = if hour24 { "%H:%M:%S" } else { "%I:%M:%S %p" };
-        format!("{} {}", tz, dt.format(fmt))
+        let fmt = if show_seconds {
+            if hour24 { "%H:%M:%S" } else { "%I:%M:%S %p" }
+        } else {
+            if hour24 { "%H:%M" } else { "%I:%M %p" }
+        };
+        let time_part = dt.format(fmt).to_string();
+        if show_tz {
+            let tz = dt.format("%Z").to_string().to_lowercase();
+            format!("{} {}", tz, time_part)
+        } else {
+            time_part
+        }
     } else {
         let dt = Utc::now();
-        let fmt = if hour24 { "%H:%M:%S" } else { "%I:%M:%S %p" };
-        format!("utc {}", dt.format(fmt))
+        let fmt = if show_seconds {
+            if hour24 { "%H:%M:%S" } else { "%I:%M:%S %p" }
+        } else {
+            if hour24 { "%H:%M" } else { "%I:%M %p" }
+        };
+        let time_part = dt.format(fmt).to_string();
+        if show_tz {
+            format!("utc {}", time_part)
+        } else {
+            time_part
+        }
     }
 }
