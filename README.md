@@ -61,4 +61,4 @@ password = ""
 `auth.enabled`: When `true`, clients must provide a password to connect.\
 `auth.password`: Hardcoded password for client authentication. If left empty, the password is prompted interactively at startup.\
 ## Disclaimer
-The `Noise_NN` pattern provides no authentication, it protects against passive eavesdroppers but not active MITM attacks beyond what Tor itself provides. This was chosen because sessions are ephemeral and short-lived.
+The `Noise_NN` pattern provides no authentication, it protects against passive eavesdroppers but not active MITM attacks beyond what Tor itself provides. This is mitigated by allowing users to set a password for authentication.
