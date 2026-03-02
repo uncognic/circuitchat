@@ -2,6 +2,8 @@ use std::error::Error;
 use std::fs;
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
+use rand::distributions::Alphanumeric;
+use rand::Rng;
 
 const CHUNK_SIZE: usize = 60_000;
 const OFFER_TAG: u8 = b'F';
@@ -212,6 +214,23 @@ fn unique_path(dir: &Path, name: &str) -> PathBuf {
     }
 
     base
+}
+
+pub fn randomize_filename_preserve_ext(name: &str) -> String {
+    let ext = Path::new(name)
+        .extension()
+        .map(|e| e.to_string_lossy().to_string());
+
+    let token: String = rand::thread_rng()
+        .sample_iter(&Alphanumeric)
+        .take(12)
+        .map(char::from)
+        .collect();
+
+    match ext {
+        Some(e) if !e.is_empty() => format!("{}.{}", token, e),
+        _ => token,
+    }
 }
 
 pub fn format_size(bytes: u64) -> String {

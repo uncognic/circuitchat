@@ -21,6 +21,7 @@ pub struct BridgeConfig {
 pub struct PrivacyConfig {
     pub typing_status: bool,
     pub read_receipts: bool,
+    pub randomize_filenames: bool,
 }
 #[derive(Debug, Serialize, Deserialize)]
 pub struct AuthConfig {
@@ -83,6 +84,7 @@ impl Default for Config {
             privacy: PrivacyConfig {
                 typing_status: false,
                 read_receipts: false,
+                randomize_filenames: true,
             },
             bridge: BridgeConfig {
                 enabled: false,

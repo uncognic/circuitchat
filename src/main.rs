@@ -63,6 +63,7 @@ async fn chat_loop<T>(
     show_tz: bool,
     typing_indicators: bool,
     delivery_receipts: bool,
+    randomize_filenames: bool,
 ) -> Result<(), Box<dyn Error>>
 where
     T: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send + Sized + 'static,
@@ -310,11 +311,14 @@ where
                                 }
                                 last_input_empty = now_empty;
                             }
-                        if let Some(text) = submitted {
+                            if let Some(text) = submitted {
                             if text.starts_with("/send ") {
                                 let path = text[6..].trim();
                                 match file_transfer::OutgoingFile::open(path) {
-                                    Ok(out) => {
+                                    Ok(mut out) => {
+                                        if randomize_filenames {
+                                            out.name = file_transfer::randomize_filename_preserve_ext(&out.name);
+                                        }
                                         if let Err(e) = np.send(
                                             &file_transfer::encode_offer(&out.name, out.size),
                                         ).await {
@@ -444,6 +448,7 @@ async fn run_initiator(
     password: String,
     typing_indicators: bool,
     delivery_receipts: bool,
+    randomize_filenames: bool,
 ) -> Result<(), Box<dyn Error>> {
     let mut prefs = StreamPrefs::new();
     prefs.connect_to_onion_services(arti_client::config::BoolOrAuto::Explicit(true));
@@ -485,6 +490,7 @@ async fn run_initiator(
                     show_tz,
                     typing_indicators,
                     delivery_receipts,
+                    randomize_filenames,
                 )
                 .await;
             }
@@ -512,6 +518,7 @@ async fn run_responder(
     password: String,
     typing_indicators: bool,
     delivery_receipts: bool,
+    randomize_filenames: bool,
 ) -> Result<(), Box<dyn Error>> {
     let config = OnionServiceConfigBuilder::default()
         .nickname("circuitchat".to_owned().try_into()?)
@@ -620,6 +627,7 @@ async fn run_responder(
             show_tz,
             typing_indicators,
             delivery_receipts,
+            randomize_filenames,
         )
         .await
         {
@@ -702,7 +710,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let tor = TorClient::<PreferredRuntime>::create_bootstrapped(tor_config).await?;
     let elapsed = start.elapsed();
     println!("tor bootstrapped in {:.1}s", elapsed.as_secs_f64());
-    
+
     if elapsed.as_secs() < 2 {
         println!("(note: tor bootstrap was fast, probably using cached tor state)");
     }
@@ -725,6 +733,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
                 auth_password.unwrap_or_default(),
                 cfg.privacy.typing_status,
                 cfg.privacy.read_receipts,
+                cfg.privacy.randomize_filenames,
             )
             .await?;
         }
@@ -740,6 +749,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
                 auth_password.unwrap_or_default(),
                 cfg.privacy.typing_status,
                 cfg.privacy.read_receipts,
+                cfg.privacy.randomize_filenames,
             )
             .await?;
         }

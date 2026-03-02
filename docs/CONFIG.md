@@ -25,6 +25,7 @@ password = ""
 [privacy]
 typing_status = false
 read_receipts = false
+randomize_filenames = true
 
 [bridge]
 enabled = false
@@ -73,6 +74,7 @@ Optional shared-password authentication. When enabled, the listener requires the
 |-----|------|---------|-------------|
 | `typing_status` | bool | `false` | Send typing start/stop notifications to your peer when you begin or clear the input field. |
 | `read_receipts` | bool | `false` | Send a "delivered" acknowledgement when a message is received. The sender's TUI marks the message as delivered. |
+| `randomize_filenames` | bool | `true` | When sending a file, randomize the filename to avoid revealing information about the file's original name. |
 
 Both features are opt-in and only active when both sides have them enabled in their own configs. A peer that does not have `typing_status` enabled will simply ignore the control messages.
 
