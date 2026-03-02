@@ -23,6 +23,10 @@ password = ""
 typing_status = false
 read_receipts = false
 
+[bridge]
+enabled = false
+lines = []
+
 ```
 `identity.persist`: When `true`, Tor state and cache are saved between runs so the onion address remains stable, and chat history is stored locally if history.save = true.\
 `history.save`: When `true` (requires `identity.persist = true`), messages are saved to an encrypted SQLite database.\
@@ -35,3 +39,12 @@ read_receipts = false
 `auth.password`: Hardcoded password for client authentication. If left empty, the password is prompted interactively at startup.\
 `privacy.typing_status`: When `true`, typing status messages are sent to the peer.\
 `privacy.read_receipts`: When `true`, "delivered" status messages are sent when messages are received.
+`bridge.enabled`: When `true`, Tor bridges are enabled. This is useful for bypassing censorship in restricted networks.\
+`bridge.lines`: A list of Tor bridge lines to use when `bridge.enabled` is `true`. Each line should be between quotes and be separated by commas. For example:
+```
+[bridge]
+enabled = true
+lines = [
+    "82.69.107.17:9001 42B0A9BA84007D81B329F2ECB86D2F44D3CA995C", "194.36.145.3:9001 2DC7C3A77E2EF0A15D16EBCA0050B73DC91E7C27"
+]
+```

@@ -1,7 +1,7 @@
 use std::env;
 use std::error::Error;
 
-use arti_client::config::TorClientConfigBuilder;
+use arti_client::config::CfgPath;
 use arti_client::{StreamPrefs, TorClient, TorClientConfig};
 use crossterm::event::{Event, EventStream, KeyCode, KeyEventKind};
 use futures::StreamExt;
@@ -24,22 +24,33 @@ use storage::{MessageDirection, Storage};
 
 const PATTERN: &str = "Noise_NN_25519_ChaChaPoly_BLAKE2s";
 const CONNECT_RETRY_DELAY: std::time::Duration = std::time::Duration::from_secs(10);
+fn build_tor_config(
+    persist: bool,
+    bridges: &config::BridgeConfig,
+) -> Result<TorClientConfig, Box<dyn Error>> {
+    let mut builder = TorClientConfig::builder();
 
-fn build_tor_config(persist: bool) -> Result<TorClientConfig, Box<dyn Error>> {
-    if !persist {
-        return Ok(TorClientConfig::default());
+    if persist {
+        let exe_dir = std::env::current_exe()?
+            .parent()
+            .ok_or("could not determine exe directory")?
+            .to_path_buf();
+        builder
+            .storage()
+            .cache_dir(CfgPath::new_literal(exe_dir.join("cache")));
+        builder
+            .storage()
+            .state_dir(CfgPath::new_literal(exe_dir.join("state")));
     }
 
-    let exe_dir = std::env::current_exe()?
-        .parent()
-        .ok_or("could not determine exe directory")?
-        .to_path_buf();
+    if bridges.enabled && !bridges.lines.is_empty() {
+        for line in &bridges.lines {
+            let bridge: arti_client::config::BridgeConfigBuilder = line.parse()?;
+            builder.bridges().bridges().push(bridge);
+        }
+    }
 
-    let config =
-        TorClientConfigBuilder::from_directories(exe_dir.join("state"), exe_dir.join("cache"))
-            .build()?;
-
-    Ok(config)
+    Ok(builder.build()?)
 }
 
 async fn chat_loop<T>(
@@ -675,13 +686,23 @@ async fn main() -> Result<(), Box<dyn Error>> {
         _ => None,
     };
 
-    let tor_config = build_tor_config(cfg.identity.persist)?;
+    let tor_config = build_tor_config(cfg.identity.persist, &cfg.bridge)?;
 
     println!("bootstrapping tor...");
+    if cfg.bridge.enabled && !cfg.bridge.lines.is_empty() {
+        println!("bridges: active ({} configured)", cfg.bridge.lines.len());
+        println!("bridge lines:");
+        for line in &cfg.bridge.lines {
+            println!("  {}", line);
+        }
+    } else {
+        println!("bridges: not configured");
+    }
     let start = std::time::Instant::now();
     let tor = TorClient::<PreferredRuntime>::create_bootstrapped(tor_config).await?;
     let elapsed = start.elapsed();
     println!("tor bootstrapped in {:.1}s", elapsed.as_secs_f64());
+    
     if elapsed.as_secs() < 2 {
         println!("(note: tor bootstrap was fast, probably using cached tor state)");
     }

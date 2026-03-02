@@ -10,6 +10,12 @@ pub struct Config {
     pub time: TimeConfig,
     pub auth: AuthConfig,
     pub privacy: PrivacyConfig,
+    pub bridge: BridgeConfig,
+}
+#[derive(Debug, Serialize, Deserialize)]
+pub struct BridgeConfig {
+    pub enabled: bool,
+    pub lines: Vec<String>,
 }
 #[derive(Debug, Serialize, Deserialize)]
 pub struct PrivacyConfig {
@@ -48,6 +54,14 @@ impl Default for AuthConfig {
         }
     }
 }
+impl Default for BridgeConfig {
+    fn default() -> Self {
+        BridgeConfig {
+            enabled: false,
+            lines: vec![],
+        }
+    }
+}
 impl Default for Config {
     fn default() -> Self {
         Config {
@@ -69,6 +83,10 @@ impl Default for Config {
             privacy: PrivacyConfig {
                 typing_status: false,
                 read_receipts: false,
+            },
+            bridge: BridgeConfig {
+                enabled: false,
+                lines: Vec::new(),
             },
         }
     }
