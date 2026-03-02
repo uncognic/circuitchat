@@ -193,7 +193,7 @@ where
                                 app.add_message(
                                     MessageDirection::Received,
                                     format!(
-                                        "[file] peer wants to send {} ({}) — type /accept or /reject",
+                                        "[file] peer wants to send {} ({}) - type /accept or /reject",
                                         name, size_str
                                     ),
                                     tui::now_timestamp(time_local, hour24, show_tz, show_seconds),
@@ -323,7 +323,7 @@ where
                                             app.add_message(
                                                 MessageDirection::Sent,
                                                 format!(
-                                                    "[file] offered {} ({}) — waiting for peer to accept",
+                                                    "[file] offered {} ({}) - waiting for peer to accept",
                                                     out.name,
                                                     file_transfer::format_size(out.size)
                                                 ),

@@ -1,0 +1,2 @@
+- add config to randomize file names\
+- allow resuming file transfers
