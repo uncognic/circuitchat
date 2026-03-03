@@ -46,7 +46,7 @@ pub fn encode_accept_with_offset(offset: u64) -> Vec<u8> {
 pub fn encode_reject() -> Vec<u8> {
     vec![0x00, MSG_FILE_REJECT]
 }
-/* 
+/*
 pub fn encode_offer(name: &str, size: u64) -> Vec<u8> {
     let mut msg = vec![0x00, OFFER_TAG];
     msg.extend_from_slice(&size.to_be_bytes());
@@ -82,7 +82,11 @@ pub fn encode_cancel() -> Vec<u8> {
 
 pub enum ParsedMessage {
     Text(String),
-    FileOffer { name: String, size: u64, checksum: Option<Vec<u8>> },
+    FileOffer {
+        name: String,
+        size: u64,
+        checksum: Option<Vec<u8>>,
+    },
     FileAccept(u64),
     FileReject,
     FileChunk(Vec<u8>),
@@ -103,10 +107,18 @@ pub fn parse_message(data: &[u8]) -> ParsedMessage {
                 if data.len() >= 18 {
                     let checksum = data[10..18].to_vec();
                     let name = String::from_utf8_lossy(&data[18..]).to_string();
-                    ParsedMessage::FileOffer { name, size, checksum: Some(checksum) }
+                    ParsedMessage::FileOffer {
+                        name,
+                        size,
+                        checksum: Some(checksum),
+                    }
                 } else {
                     let name = String::from_utf8_lossy(&data[10..]).to_string();
-                    ParsedMessage::FileOffer { name, size, checksum: None }
+                    ParsedMessage::FileOffer {
+                        name,
+                        size,
+                        checksum: None,
+                    }
                 }
             }
             CHUNK_TAG => ParsedMessage::FileChunk(data[2..].to_vec()),
@@ -142,7 +154,11 @@ pub struct IncomingFile {
 }
 
 impl IncomingFile {
-    pub fn begin(name: &str, size: u64, expected_checksum: Option<&[u8]>) -> Result<Self, Box<dyn Error>> {
+    pub fn begin(
+        name: &str,
+        size: u64,
+        expected_checksum: Option<&[u8]>,
+    ) -> Result<Self, Box<dyn Error>> {
         let dir = downloads_dir()?;
         fs::create_dir_all(&dir)?;
 
@@ -162,7 +178,10 @@ impl IncomingFile {
         let writer = std::io::BufWriter::new(file);
 
         if let Some(sum) = expected_checksum {
-            let meta_path = path.with_file_name(format!("{}.xxh3", path.file_name().unwrap().to_string_lossy()));
+            let meta_path = path.with_file_name(format!(
+                "{}.xxh3",
+                path.file_name().unwrap().to_string_lossy()
+            ));
             let mut mf = fs::File::create(&meta_path)?;
             let hexstr = hex::encode(sum);
             mf.write_all(hexstr.as_bytes())?;
@@ -186,7 +205,10 @@ impl IncomingFile {
     pub fn finish(mut self) -> Result<PathBuf, Box<dyn Error>> {
         self.writer.flush()?;
 
-        let meta_path = self.path.with_file_name(format!("{}.xxh3", self.path.file_name().unwrap().to_string_lossy()));
+        let meta_path = self.path.with_file_name(format!(
+            "{}.xxh3",
+            self.path.file_name().unwrap().to_string_lossy()
+        ));
         if meta_path.exists() {
             if let Ok(expected_hex) = fs::read_to_string(&meta_path) {
                 if !expected_hex.trim().is_empty() {
@@ -226,14 +248,16 @@ impl OutgoingFile {
             .ok_or("invalid file path")?
             .to_string_lossy()
             .to_string();
-        
+
         let mut hasher = Xxh3::new();
         let mut hfile = fs::File::open(path)?;
         let mut hreader = std::io::BufReader::new(&mut hfile);
         let mut buf = [0u8; 8192];
         loop {
             let n = hreader.read(&mut buf)?;
-            if n == 0 { break; }
+            if n == 0 {
+                break;
+            }
             hasher.update(&buf[..n]);
         }
         let checksum_u = hasher.digest();
@@ -276,6 +300,14 @@ fn downloads_dir() -> Result<PathBuf, Box<dyn Error>> {
     Ok(exe_dir.join("downloads"))
 }
 
+pub fn remove_downloads_dir() -> Result<(), Box<dyn Error>> {
+    let dir = downloads_dir()?;
+    if dir.exists() {
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+    Ok(())
+}
+
 pub fn download_path(name: &str) -> Result<PathBuf, Box<dyn Error>> {
     let dir = downloads_dir()?;
     Ok(dir.join(sanitize_filename(name)))
@@ -289,7 +321,9 @@ pub fn file_xxh3(path: &Path) -> Result<Vec<u8>, Box<dyn Error>> {
     let mut buf = [0u8; 8192];
     loop {
         let n = reader.read(&mut buf)?;
-        if n == 0 { break; }
+        if n == 0 {
+            break;
+        }
         hasher.update(&buf[..n]);
     }
     Ok(hasher.digest().to_be_bytes().to_vec())

@@ -4,7 +4,9 @@ use chacha20poly1305::{AeadCore, XChaCha20Poly1305, XNonce};
 use rand::RngCore;
 use rusqlite::Connection;
 use std::error::Error;
+use std::io::Write;
 use std::path::PathBuf;
+use zeroize::Zeroize;
 
 fn derive_key(passphrase: &str, salt: &[u8; 16]) -> Result<[u8; 32], Box<dyn Error>> {
     let mut key = [0u8; 32];
@@ -136,8 +138,39 @@ impl Storage {
 
         Ok(messages)
     }
+
+    pub fn wipe(mut self) {
+        let _ = self
+            .conn
+            .execute_batch("DELETE FROM messages; DELETE FROM meta; VACUUM;");
+
+        self.key.zeroize();
+
+        drop(self.conn);
+        if let Ok(path) = db_path() {
+            if path.exists() {
+                let _ = zero_and_delete_file(&path);
+            }
+        }
+    }
 }
 
+pub fn zero_and_delete_file(path: &std::path::Path) -> Result<(), Box<dyn Error>> {
+    let len = std::fs::metadata(path)?.len() as usize;
+    if len > 0 {
+        let mut f = std::fs::OpenOptions::new().write(true).open(path)?;
+        let chunk = vec![0u8; 4096];
+        let mut remaining = len;
+        while remaining > 0 {
+            let to_write = std::cmp::min(chunk.len(), remaining);
+            f.write_all(&chunk[..to_write])?;
+            remaining -= to_write;
+        }
+        f.sync_all()?;
+    }
+    std::fs::remove_file(path)?;
+    Ok(())
+}
 pub fn db_path() -> Result<PathBuf, Box<dyn Error>> {
     let exe_dir = std::env::current_exe()?
         .parent()
@@ -171,6 +204,7 @@ impl MessageDirection {
     fn from_str(s: &str) -> Self {
         match s {
             "sent" => MessageDirection::Sent,
+            "system" => MessageDirection::System,
             _ => MessageDirection::Received,
         }
     }

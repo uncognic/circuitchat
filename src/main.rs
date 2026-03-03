@@ -20,8 +20,15 @@ mod noise_peer;
 mod storage;
 mod tui;
 
+use crossterm::{
+    cursor::MoveTo,
+    execute,
+    terminal::{Clear, ClearType},
+};
 use noise_peer::NoisePeer;
+use std::process;
 use storage::{MessageDirection, Storage};
+use zeroize::Zeroize;
 
 const PATTERN: &str = "Noise_NN_25519_ChaChaPoly_BLAKE2s";
 const CONNECT_RETRY_DELAY: std::time::Duration = std::time::Duration::from_secs(10);
@@ -63,9 +70,61 @@ fn build_tor_config(
     Ok(builder.build()?)
 }
 
+fn perform_panic_and_exit(storage: Option<Storage>) -> Result<(), Box<dyn Error>> {
+    use std::io::Write;
+
+    let exe_dir = std::env::current_exe()?
+        .parent()
+        .ok_or("could not determine exe directory")?
+        .to_path_buf();
+
+    if let Some(s) = storage {
+        s.wipe();
+    }
+
+    let cache_dir = exe_dir.join("cache");
+    if cache_dir.exists() {
+        zero_directory_contents(&cache_dir);
+        let _ = std::fs::remove_dir_all(&cache_dir);
+    }
+    let state_dir = exe_dir.join("state");
+    if state_dir.exists() {
+        zero_directory_contents(&state_dir);
+        let _ = std::fs::remove_dir_all(&state_dir);
+    }
+
+    if let Ok(cfg_path) = crate::config::config_path() {
+        if cfg_path.exists() {
+            let _ = crate::storage::zero_and_delete_file(&cfg_path);
+        }
+    }
+
+    let _ = crate::file_transfer::remove_downloads_dir();
+
+    let _ = ratatui::restore();
+    let _ = execute!(std::io::stdout(), Clear(ClearType::All), MoveTo(0, 0));
+    let _ = std::io::stdout().flush();
+    let _ = std::io::stderr().flush();
+    process::exit(1);
+}
+
+fn zero_directory_contents(dir: &std::path::Path) {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.is_dir() {
+            zero_directory_contents(&path);
+        } else if path.is_file() {
+            let _ = crate::storage::zero_and_delete_file(&path);
+        }
+    }
+}
+
 async fn chat_loop<T>(
     mut np: NoisePeer<T>,
-    storage: Option<&Storage>,
+    storage: &mut Option<Storage>,
     initial_status: &str,
     status_ctx: &StatusContext,
     time_local: bool,
@@ -83,7 +142,7 @@ where
     let mut app = tui::App::new(initial_status);
     app.session_fingerprint = Some(np.session_fingerprint.clone());
 
-    if let Some(s) = storage {
+    if let Some(ref s) = *storage {
         if let Ok(messages) = s.load_history() {
             for msg in messages {
                 app.add_message(
@@ -114,7 +173,7 @@ where
         );
     loop {
         terminal.draw(|f| app.draw(f))?;
-        
+
         // file mode
         if outgoing_file.is_some() {
             let cancelled = tokio::select! {
@@ -215,7 +274,7 @@ where
                                     content,
                                     tui::now_timestamp(time_local, hour24, show_tz, show_seconds),
                                 );
-                                if let Some(s) = storage {
+                                if let Some(ref s) = *storage {
                                     if let Err(e) = s.save_message(MessageDirection::Received, &msg) {
                                         app.status = format!("save error: {}", e);
                                     }
@@ -477,10 +536,18 @@ where
                                 }
                             } else if text == "/clear" {
                                 app.messages.clear();
+                            } else if text == "/panic" {
+                                // Take ownership of Storage so we can close the
+                                // SQLite handle before touching the file on disk.
+                                let owned_storage = storage.take();
+                                if let Err(e) = perform_panic_and_exit(owned_storage) {
+                                    eprintln!("panic cleanup failed: {}", e);
+                                }
+                                process::exit(1);
                             } else if text == "/help" {
                                 app.add_message(
                                     MessageDirection::System,
-                                    "[help] available commands: /clear, /help, /status, /send, /ping".to_string(),
+                                    "[help] available commands: /clear, /help, /status, /send, /ping, /panic".to_string(),
                                     tui::now_timestamp(time_local, hour24, show_tz, show_seconds),
                                 );
                             } else if text == "/status" {
@@ -565,7 +632,7 @@ where
                                 if delivery_receipts {
                                     app.pending_delivery += 1;
                                 }
-                                if let Some(s) = storage {
+                                if let Some(ref s) = *storage {
                                     if let Err(e) = s.save_message(MessageDirection::Sent, &bytes) {
                                         app.status = format!("save error: {}", e);
                                     }
@@ -591,7 +658,7 @@ where
 async fn run_initiator(
     tor: &TorClient<PreferredRuntime>,
     peer_onion: &str,
-    storage: Option<Storage>,
+    mut storage: Option<Storage>,
     time_local: bool,
     hour24: bool,
     show_seconds: bool,
@@ -640,12 +707,13 @@ async fn run_initiator(
                     onion_addr: None,
                     history_saving: storage.is_some(),
                 };
-
+                let mut password_owned = password;
+                password_owned.zeroize();
                 let initial_status = "connected";
 
                 return chat_loop(
                     np,
-                    storage.as_ref(),
+                    &mut storage,
                     &initial_status,
                     &status_ctx,
                     time_local,
@@ -673,7 +741,7 @@ async fn run_initiator(
 
 async fn run_responder(
     tor: &TorClient<PreferredRuntime>,
-    storage: Option<Storage>,
+    mut storage: Option<Storage>,
     time_local: bool,
     hour24: bool,
     show_seconds: bool,
@@ -770,14 +838,20 @@ async fn run_responder(
                 continue;
             }
         };
-        let auth_pw = if auth_enabled {
+        let mut auth_pw = if auth_enabled {
             Some(password.clone())
         } else {
             None
         };
         if let Err(e) = np.auth_responder(auth_pw.as_deref()).await {
+            if let Some(ref mut p) = auth_pw {
+                p.zeroize();
+            }
             eprintln!("authentication failed: {}", e);
             continue;
+        }
+        if let Some(ref mut p) = auth_pw {
+            p.zeroize();
         }
         let status = "connected".to_string();
 
@@ -792,7 +866,7 @@ async fn run_responder(
 
         if let Err(e) = chat_loop(
             np,
-            storage.as_ref(),
+            &mut storage,
             &status,
             &status_ctx,
             time_local,
@@ -860,7 +934,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     }
 
     let cfg = config::load_or_create()?;
-    let passphrase = config::resolve_passphrase(&cfg)?;
+    let mut passphrase = config::resolve_passphrase(&cfg)?;
     let auth_password = config::resolve_auth_password(&cfg)?;
 
     let storage = match passphrase {
@@ -868,15 +942,15 @@ async fn main() -> Result<(), Box<dyn Error>> {
         _ => None,
     };
 
+    if let Some(ref mut p) = passphrase {
+        p.zeroize();
+    }
+
     let tor_config = build_tor_config(cfg.identity.persist, &cfg.bridge)?;
 
     println!("bootstrapping tor...");
     if cfg.bridge.enabled && !cfg.bridge.lines.is_empty() {
         println!("bridges: active ({} configured)", cfg.bridge.lines.len());
-        println!("bridge lines:");
-        for line in &cfg.bridge.lines {
-            println!("  {}", line);
-        }
     } else {
         println!("bridges: not configured");
     }

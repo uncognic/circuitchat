@@ -182,6 +182,11 @@ impl App {
                 self.should_quit = true;
                 None
             }
+            KeyCode::Char('w') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                self.input.clear();
+                self.cursor_position = 0;
+                return Some("/panic".to_string());
+            }
             KeyCode::Char('d') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                 self.should_quit = true;
                 None
@@ -387,6 +392,7 @@ impl App {
             Line::from(""),
             Line::from("  alt+m : toggle menu"),
             Line::from("  ctrl+c / ctrl+d : quit"),
+            Line::from("  ctrl+w : panic (wipe & exit)"),
             Line::from(""),
             Line::from(Span::styled(
                 "actions:",
