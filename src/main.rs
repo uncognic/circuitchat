@@ -24,6 +24,15 @@ use storage::{MessageDirection, Storage};
 
 const PATTERN: &str = "Noise_NN_25519_ChaChaPoly_BLAKE2s";
 const CONNECT_RETRY_DELAY: std::time::Duration = std::time::Duration::from_secs(10);
+
+struct StatusContext {
+    bootstrap_secs: Option<f64>,
+    bridges_configured: usize,
+    bridges_active: bool,
+    identity_persist: bool,
+    onion_addr: Option<String>,
+    history_saving: bool,
+}
 fn build_tor_config(
     persist: bool,
     bridges: &config::BridgeConfig,
@@ -57,6 +66,7 @@ async fn chat_loop<T>(
     mut np: NoisePeer<T>,
     storage: Option<&Storage>,
     initial_status: &str,
+    status_ctx: &StatusContext,
     time_local: bool,
     hour24: bool,
     show_seconds: bool,
@@ -423,6 +433,69 @@ where
                                 } else {
                                     app.status = "no pending file offer".to_string();
                                 }
+                            } else if text == "/clear" {
+                                app.messages.clear();
+                            } else if text == "/help" {
+                                app.add_message(
+                                    MessageDirection::System,
+                                    "[help] available commands: /clear, /help, /status, /send".to_string(),
+                                    tui::now_timestamp(time_local, hour24, show_tz, show_seconds),
+                                );
+                            } else if text == "/status" {
+                                let ts = tui::now_timestamp(time_local, hour24, show_tz, show_seconds);
+                                let bs_line = if let Some(s) = status_ctx.bootstrap_secs {
+                                    format!("[status] tor: connected ({:.1}s bootstrap)", s)
+                                } else {
+                                    "[status] tor: connected".to_string()
+                                };
+
+                                let bridges_line = if status_ctx.bridges_active {
+                                    format!(
+                                        "[status] bridges: active ({} configured)",
+                                        status_ctx.bridges_configured
+                                    )
+                                } else {
+                                    "[status] bridges: not configured".to_string()
+                                };
+                                if let Some(ref addr) = status_ctx.onion_addr {
+                                    app.add_message(
+                                        MessageDirection::System,
+                                        format!("[status] your address: {}", addr),
+                                        ts.clone(),
+                                    );
+                                }
+                                let identity_line = if status_ctx.identity_persist {
+                                    "[status] identity: persistent".to_string()
+                                } else {
+                                    "[status] identity: ephemeral".to_string()
+                                };
+
+                                let history_line = if status_ctx.history_saving {
+                                    "[status] history: saving (encrypted)".to_string()
+                                } else {
+                                    "[status] history: disabled".to_string()
+                                };
+
+                                app.add_message(
+                                    MessageDirection::System,
+                                    bs_line,
+                                    ts.clone(),
+                                );
+                                app.add_message(
+                                    MessageDirection::System,
+                                    bridges_line,
+                                    ts.clone(),
+                                );
+                                app.add_message(
+                                    MessageDirection::System,
+                                    identity_line,
+                                    ts.clone(),
+                                );
+                                app.add_message(
+                                    MessageDirection::System,
+                                    history_line,
+                                    ts,
+                                );
                             } else {
                                 let bytes = text.as_bytes().to_vec();
                                 if let Err(e) = np.send(&bytes).await {
@@ -509,10 +582,20 @@ async fn run_initiator(
                     None
                 };
                 np.auth_initiator(auth_pw.as_deref()).await?;
+                let status_ctx = StatusContext {
+                    bootstrap_secs: None,
+                    bridges_configured: 0,
+                    bridges_active: false,
+                    identity_persist: storage.is_some(),
+                    onion_addr: None,
+                    history_saving: storage.is_some(),
+                };
+
                 return chat_loop(
                     np,
                     storage.as_ref(),
-                    &format!("connected to peer {}", peer_onion),
+                    "connected",
+                    &status_ctx,
                     time_local,
                     hour24,
                     show_seconds,
@@ -644,12 +727,22 @@ async fn run_responder(
             eprintln!("authentication failed: {}", e);
             continue;
         }
-        let status = format!("connected | you are {}", addr_str);
+        let status = "connected".to_string();
+
+        let status_ctx = StatusContext {
+            bootstrap_secs: None,
+            bridges_configured: 0,
+            bridges_active: false,
+            identity_persist: storage.is_some(),
+            onion_addr: Some(addr_str.clone()),
+            history_saving: storage.is_some(),
+        };
 
         if let Err(e) = chat_loop(
             np,
             storage.as_ref(),
             &status,
+            &status_ctx,
             time_local,
             hour24,
             show_seconds,

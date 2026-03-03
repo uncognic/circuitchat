@@ -159,9 +159,15 @@ impl App {
                     self.should_quit = true;
                     return None;
                 }
-                KeyCode::Char('s') | KeyCode::Char('S') => {
+                KeyCode::Char('h') | KeyCode::Char('H') => {
                     self.show_menu = false;
-                    self.input = "/send ".to_string();
+                    self.input = "/help ".to_string();
+                    self.cursor_position = self.input.len();
+                    return None;
+                }
+                KeyCode::Char('m') | KeyCode::Char('M') => {
+                    self.show_menu = false;
+                    self.input = "@peer ".to_string();
                     self.cursor_position = self.input.len();
                     return None;
                 }
@@ -300,6 +306,7 @@ impl App {
                 let (label, color) = match msg.direction {
                     MessageDirection::Sent => ("you", Color::Green),
                     MessageDirection::Received => ("peer", Color::Cyan),
+                    MessageDirection::System => ("system", Color::Yellow),
                 };
                 Line::from(vec![
                     Span::styled(
@@ -348,29 +355,28 @@ impl App {
 
         let block = Block::default()
             .borders(Borders::ALL)
-            .title(" Menu ")
+            .title(" menu ")
             .border_style(Style::default().fg(Color::White));
 
         let lines: Vec<Line> = vec![
             Line::from(Span::styled(
-                "Shortcuts:",
+                "shortcuts:",
                 Style::default().add_modifier(Modifier::BOLD),
             )),
             Line::from(""),
-            Line::from("  Alt+M : Toggle menu"),
-            Line::from("  Ctrl+C / Ctrl+D : Quit"),
+            Line::from("  alt+m : toggle menu"),
+            Line::from("  ctrl+c / ctrl+d : quit"),
             Line::from(""),
             Line::from(Span::styled(
-                "Actions:",
+                "actions:",
                 Style::default().add_modifier(Modifier::BOLD),
             )),
             Line::from(""),
-            Line::from("  /send (s) : Send a file"),
-            Line::from("  /cancel : Cancel incoming transfer"),
-            Line::from("  @peer : Sound the bell in peer's terminal"),
+            Line::from("  /help (h) : show available commands"),
+            Line::from("  @peer (m) : sound the bell in peer's terminal"),
             Line::from(""),
             Line::from(Span::styled(
-                "Q / Enter to quit · Esc to close",
+                "q / enter to quit - esc to close",
                 Style::default().fg(Color::DarkGray),
             )),
         ];

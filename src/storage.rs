@@ -156,6 +156,7 @@ pub struct Message {
 pub enum MessageDirection {
     Sent,
     Received,
+    System,
 }
 
 impl MessageDirection {
@@ -163,6 +164,7 @@ impl MessageDirection {
         match self {
             MessageDirection::Sent => "sent",
             MessageDirection::Received => "received",
+            MessageDirection::System => "system",
         }
     }
 
