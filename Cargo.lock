@@ -606,7 +606,7 @@ dependencies = [
 
 [[package]]
 name = "circuitchat"
-version = "1.4.1"
+version = "1.5.0"
 dependencies = [
  "argon2",
  "arti-client",
@@ -614,6 +614,7 @@ dependencies = [
  "chrono",
  "crossterm",
  "futures",
+ "hex",
  "hmac",
  "rand 0.8.5",
  "ratatui",
@@ -629,6 +630,7 @@ dependencies = [
  "tor-cell",
  "tor-hsservice",
  "tor-rtcompat",
+ "xxhash-rust",
 ]
 
 [[package]]

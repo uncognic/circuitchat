@@ -1,9 +1,10 @@
+use rand::Rng;
+use rand::distributions::Alphanumeric;
 use std::error::Error;
 use std::fs;
-use std::io::{Read, Write};
+use std::io::{Read, Seek, Write};
 use std::path::{Path, PathBuf};
-use rand::distributions::Alphanumeric;
-use rand::Rng;
+use xxhash_rust::xxh3::Xxh3;
 
 const CHUNK_SIZE: usize = 60_000;
 const OFFER_TAG: u8 = b'F';
@@ -25,16 +26,32 @@ pub fn encode_typing_stop() -> Vec<u8> {
 pub fn encode_delivered() -> Vec<u8> {
     vec![0x00, MSG_DELIVERED]
 }
-pub fn encode_accept() -> Vec<u8> {
-    vec![0x00, MSG_FILE_ACCEPT]
+//pub fn encode_accept() -> Vec<u8> {
+//    vec![0x00, MSG_FILE_ACCEPT]
+//}
+
+pub fn encode_accept_with_offset(offset: u64) -> Vec<u8> {
+    let mut msg = vec![0x00, MSG_FILE_ACCEPT];
+    msg.extend_from_slice(&offset.to_be_bytes());
+    msg
 }
 pub fn encode_reject() -> Vec<u8> {
     vec![0x00, MSG_FILE_REJECT]
 }
-
+/* 
 pub fn encode_offer(name: &str, size: u64) -> Vec<u8> {
     let mut msg = vec![0x00, OFFER_TAG];
     msg.extend_from_slice(&size.to_be_bytes());
+    msg.extend_from_slice(name.as_bytes());
+    msg
+}
+*/
+pub fn encode_offer_with_checksum(name: &str, size: u64, checksum: Option<&[u8]>) -> Vec<u8> {
+    let mut msg = vec![0x00, OFFER_TAG];
+    msg.extend_from_slice(&size.to_be_bytes());
+    if let Some(c) = checksum {
+        msg.extend_from_slice(c);
+    }
     msg.extend_from_slice(name.as_bytes());
     msg
 }
@@ -57,8 +74,8 @@ pub fn encode_cancel() -> Vec<u8> {
 
 pub enum ParsedMessage {
     Text(String),
-    FileOffer { name: String, size: u64 },
-    FileAccept,
+    FileOffer { name: String, size: u64, checksum: Option<Vec<u8>> },
+    FileAccept(u64),
     FileReject,
     FileChunk(Vec<u8>),
     FileDone,
@@ -73,13 +90,26 @@ pub fn parse_message(data: &[u8]) -> ParsedMessage {
         match data[1] {
             OFFER_TAG if data.len() >= 10 => {
                 let size = u64::from_be_bytes(data[2..10].try_into().unwrap());
-                let name = String::from_utf8_lossy(&data[10..]).to_string();
-                ParsedMessage::FileOffer { name, size }
+                if data.len() >= 18 {
+                    let checksum = data[10..18].to_vec();
+                    let name = String::from_utf8_lossy(&data[18..]).to_string();
+                    ParsedMessage::FileOffer { name, size, checksum: Some(checksum) }
+                } else {
+                    let name = String::from_utf8_lossy(&data[10..]).to_string();
+                    ParsedMessage::FileOffer { name, size, checksum: None }
+                }
             }
             CHUNK_TAG => ParsedMessage::FileChunk(data[2..].to_vec()),
             DONE_TAG => ParsedMessage::FileDone,
             CANCEL_TAG => ParsedMessage::FileCancel,
-            MSG_FILE_ACCEPT => ParsedMessage::FileAccept,
+            MSG_FILE_ACCEPT => {
+                if data.len() >= 10 {
+                    let offset = u64::from_be_bytes(data[2..10].try_into().unwrap());
+                    ParsedMessage::FileAccept(offset)
+                } else {
+                    ParsedMessage::FileAccept(0)
+                }
+            }
             MSG_FILE_REJECT => ParsedMessage::FileReject,
             MSG_TYPING_START => ParsedMessage::TypingStart,
             MSG_TYPING_STOP => ParsedMessage::TypingStop,
@@ -100,20 +130,36 @@ pub struct IncomingFile {
 }
 
 impl IncomingFile {
-    pub fn begin(name: &str, size: u64) -> Result<Self, Box<dyn Error>> {
+    pub fn begin(name: &str, size: u64, expected_checksum: Option<&[u8]>) -> Result<Self, Box<dyn Error>> {
         let dir = downloads_dir()?;
         fs::create_dir_all(&dir)?;
 
         let sanitized = sanitize_filename(name);
-        let path = unique_path(&dir, &sanitized);
+        let path = dir.join(&sanitized);
 
-        let file = fs::File::create(&path)?;
+        let file_exists = path.exists();
+        let file = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&path)?;
+        let received = if file_exists {
+            file.metadata()?.len()
+        } else {
+            0
+        };
         let writer = std::io::BufWriter::new(file);
+
+        if let Some(sum) = expected_checksum {
+            let meta_path = path.with_file_name(format!("{}.xxh3", path.file_name().unwrap().to_string_lossy()));
+            let mut mf = fs::File::create(&meta_path)?;
+            let hexstr = hex::encode(sum);
+            mf.write_all(hexstr.as_bytes())?;
+        }
 
         Ok(IncomingFile {
             name: sanitized,
             size,
-            received: 0,
+            received,
             writer,
             path,
         })
@@ -127,6 +173,20 @@ impl IncomingFile {
 
     pub fn finish(mut self) -> Result<PathBuf, Box<dyn Error>> {
         self.writer.flush()?;
+
+        let meta_path = self.path.with_file_name(format!("{}.xxh3", self.path.file_name().unwrap().to_string_lossy()));
+        if meta_path.exists() {
+            if let Ok(expected_hex) = fs::read_to_string(&meta_path) {
+                if !expected_hex.trim().is_empty() {
+                    let expected = hex::decode(expected_hex.trim())?;
+                    let actual = file_xxh3(&self.path)?;
+                    if expected != actual {
+                        return Err(From::from("checksum mismatch after download"));
+                    }
+                }
+            }
+            let _ = fs::remove_file(&meta_path);
+        }
         Ok(self.path)
     }
 
@@ -140,6 +200,7 @@ pub struct OutgoingFile {
     pub name: String,
     pub size: u64,
     pub sent: u64,
+    pub checksum: Vec<u8>,
     reader: std::io::BufReader<fs::File>,
 }
 
@@ -153,12 +214,26 @@ impl OutgoingFile {
             .ok_or("invalid file path")?
             .to_string_lossy()
             .to_string();
+        
+        let mut hasher = Xxh3::new();
+        let mut hfile = fs::File::open(path)?;
+        let mut hreader = std::io::BufReader::new(&mut hfile);
+        let mut buf = [0u8; 8192];
+        loop {
+            let n = hreader.read(&mut buf)?;
+            if n == 0 { break; }
+            hasher.update(&buf[..n]);
+        }
+        let checksum_u = hasher.digest();
+        let checksum = checksum_u.to_be_bytes().to_vec();
+
         let file = fs::File::open(path)?;
         let reader = std::io::BufReader::new(file);
         Ok(OutgoingFile {
             name,
             size,
             sent: 0,
+            checksum,
             reader,
         })
     }
@@ -173,6 +248,13 @@ impl OutgoingFile {
         self.sent += n as u64;
         Ok(Some(buf))
     }
+
+    pub fn seek_to(&mut self, offset: u64) -> Result<(), Box<dyn Error>> {
+        use std::io::SeekFrom;
+        self.reader.get_mut().seek(SeekFrom::Start(offset))?;
+        self.sent = offset;
+        Ok(())
+    }
 }
 fn downloads_dir() -> Result<PathBuf, Box<dyn Error>> {
     let exe_dir = std::env::current_exe()?
@@ -182,7 +264,26 @@ fn downloads_dir() -> Result<PathBuf, Box<dyn Error>> {
     Ok(exe_dir.join("downloads"))
 }
 
-fn sanitize_filename(name: &str) -> String {
+pub fn download_path(name: &str) -> Result<PathBuf, Box<dyn Error>> {
+    let dir = downloads_dir()?;
+    Ok(dir.join(sanitize_filename(name)))
+}
+
+pub fn file_xxh3(path: &Path) -> Result<Vec<u8>, Box<dyn Error>> {
+    use xxhash_rust::xxh3::Xxh3;
+    let mut hasher = Xxh3::new();
+    let file = fs::File::open(path)?;
+    let mut reader = std::io::BufReader::new(file);
+    let mut buf = [0u8; 8192];
+    loop {
+        let n = reader.read(&mut buf)?;
+        if n == 0 { break; }
+        hasher.update(&buf[..n]);
+    }
+    Ok(hasher.digest().to_be_bytes().to_vec())
+}
+
+pub fn sanitize_filename(name: &str) -> String {
     let name = Path::new(name)
         .file_name()
         .map(|n| n.to_string_lossy().to_string())
@@ -191,6 +292,17 @@ fn sanitize_filename(name: &str) -> String {
     name.replace(['/', '\\', ':', '*', '?', '"', '<', '>', '|'], "_")
 }
 
+pub fn existing_download_size(name: &str) -> Result<u64, Box<dyn Error>> {
+    let dir = downloads_dir()?;
+    let sanitized = sanitize_filename(name);
+    let path = dir.join(&sanitized);
+    if path.exists() {
+        Ok(fs::metadata(path)?.len())
+    } else {
+        Ok(0)
+    }
+}
+/*
 fn unique_path(dir: &Path, name: &str) -> PathBuf {
     let base = dir.join(name);
     if !base.exists() {
@@ -215,7 +327,7 @@ fn unique_path(dir: &Path, name: &str) -> PathBuf {
 
     base
 }
-
+*/
 pub fn randomize_filename_preserve_ext(name: &str) -> String {
     let ext = Path::new(name)
         .extension()

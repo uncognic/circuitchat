@@ -42,7 +42,7 @@ pub struct App {
     pub show_menu: bool,
     pub send_progress: Option<TransferProgress>,
     pub recv_progress: Option<TransferProgress>,
-    pub pending_incoming_offer: Option<(String, u64)>,
+    pub pending_incoming_offer: Option<(String, u64, Option<Vec<u8>>)>,
     pub peer_typing: bool,
     pub pending_delivery: usize,
 }
@@ -326,10 +326,7 @@ impl App {
         if area.width > w {
             let x = area.x + area.width.saturating_sub(w);
             let rect = Rect::new(x, area.y, w, 1);
-            let p = Paragraph::new(Line::from(Span::styled(
-                label,
-                Style::default(),
-            )));
+            let p = Paragraph::new(Line::from(Span::styled(label, Style::default())));
             frame.render_widget(p, rect);
         }
     }

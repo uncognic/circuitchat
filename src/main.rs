@@ -189,7 +189,7 @@ where
                                     app.status = app.status.replace(" | peer is typing...", "");
                                 }
                             }
-                            file_transfer::ParsedMessage::FileOffer { name, size } => {
+                            file_transfer::ParsedMessage::FileOffer { name, size, checksum } => {
                                 let size_str = file_transfer::format_size(size);
                                 app.add_message(
                                     MessageDirection::Received,
@@ -199,7 +199,7 @@ where
                                     ),
                                     tui::now_timestamp(time_local, hour24, show_tz, show_seconds),
                                 );
-                                app.pending_incoming_offer = Some((name, size));
+                                app.pending_incoming_offer = Some((name, size, checksum));
                             }
                             file_transfer::ParsedMessage::FileChunk(data) => {
                                 if let Some(ref mut inc) = incoming_file {
@@ -250,15 +250,20 @@ where
                                     app.clear_recv_progress();
                                 }
                             }
-                            file_transfer::ParsedMessage::FileAccept => {
-                                if let Some(out) = pending_offer.take() {
-                                    app.add_message(
-                                        MessageDirection::Received,
-                                        format!("[file] peer accepted {}", out.name),
-                                        tui::now_timestamp(time_local, hour24, show_tz, show_seconds),
-                                    );
-                                    app.set_send_progress(out.name.clone(), out.size);
-                                    outgoing_file = Some(out);
+                            file_transfer::ParsedMessage::FileAccept(offset) => {
+                                if let Some(mut out) = pending_offer.take() {
+                                    if let Err(e) = out.seek_to(offset) {
+                                        app.status = format!("file seek error: {}", e);
+                                    } else {
+                                        app.add_message(
+                                            MessageDirection::Received,
+                                            format!("[file] peer accepted {}", out.name),
+                                            tui::now_timestamp(time_local, hour24, show_tz, show_seconds),
+                                        );
+                                        app.set_send_progress(out.name.clone(), out.size);
+                                        app.update_send_progress(out.sent);
+                                        outgoing_file = Some(out);
+                                    }
                                 }
                             }
                             file_transfer::ParsedMessage::FileReject => {
@@ -320,7 +325,7 @@ where
                                             out.name = file_transfer::randomize_filename_preserve_ext(&out.name);
                                         }
                                         if let Err(e) = np.send(
-                                            &file_transfer::encode_offer(&out.name, out.size),
+                                            &file_transfer::encode_offer_with_checksum(&out.name, out.size, Some(&out.checksum)),
                                         ).await {
                                             app.status = format!("send failed: {}", e);
                                         } else {
@@ -359,10 +364,34 @@ where
                                 } else if let Some(ref offer) = app.pending_incoming_offer {
                                     let name = offer.0.clone();
                                     let size = offer.1;
-                                    if let Err(e) = np.send(&file_transfer::encode_accept()).await {
+                                    let checksum = offer.2.as_ref();
+                                    let existing = match file_transfer::existing_download_size(&name) {
+                                        Ok(n) => n,
+                                        Err(_) => 0,
+                                    };
+
+                                    if existing == size && checksum.is_some() {
+                                        if let Ok(path) = file_transfer::download_path(&name) {
+                                                if let Ok(sum) = file_transfer::file_xxh3(&path) {
+                                                if &sum == checksum.unwrap() {
+                                                    app.add_message(
+                                                        MessageDirection::Received,
+                                                        format!("[file] already downloaded {}", name),
+                                                        tui::now_timestamp(time_local, hour24, show_tz, show_seconds),
+                                                    );
+                                                    app.pending_incoming_offer = None;
+                                                    continue;
+                                                }
+                                            }
+                                        }
+                                    }
+                                    if let Err(e) = np
+                                        .send(&file_transfer::encode_accept_with_offset(existing))
+                                        .await
+                                    {
                                         app.status = format!("send failed: {}", e);
                                     } else {
-                                        match file_transfer::IncomingFile::begin(&name, size) {
+                                        match file_transfer::IncomingFile::begin(&name, size, offer.2.as_deref()) {
                                             Ok(inc) => {
                                                 app.set_recv_progress(name.clone(), size);
                                                 incoming_file = Some(inc);
