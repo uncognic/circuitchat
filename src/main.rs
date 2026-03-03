@@ -15,6 +15,7 @@ use tor_hsservice::status::State;
 
 mod config;
 mod file_transfer;
+mod fingerprint;
 mod noise_peer;
 mod storage;
 mod tui;
@@ -80,6 +81,7 @@ where
 {
     let mut terminal = ratatui::init();
     let mut app = tui::App::new(initial_status);
+    app.session_fingerprint = Some(np.session_fingerprint.clone());
 
     if let Some(s) = storage {
         if let Ok(messages) = s.load_history() {
@@ -105,10 +107,14 @@ where
     let ping_timeout = std::time::Duration::from_secs(45);
     let mut peer_responding = true;
     let mut awaiting_ping_response = false;
-
+    app.add_message(
+            MessageDirection::System,
+            "compare the fingerprint at the bottom with your peer's. if it is the same, the connection is secure.".to_string(),
+            tui::now_timestamp(time_local, hour24, show_tz, show_seconds),
+        );
     loop {
         terminal.draw(|f| app.draw(f))?;
-
+        
         // file mode
         if outgoing_file.is_some() {
             let cancelled = tokio::select! {
@@ -635,10 +641,12 @@ async fn run_initiator(
                     history_saving: storage.is_some(),
                 };
 
+                let initial_status = "connected";
+
                 return chat_loop(
                     np,
                     storage.as_ref(),
-                    "connected",
+                    &initial_status,
                     &status_ctx,
                     time_local,
                     hour24,

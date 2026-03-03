@@ -8,6 +8,7 @@ pub struct NoisePeer<T> {
     stream: T,
     transport: snow::TransportState,
     read_buf: Vec<u8>,
+    pub session_fingerprint: String,
 }
 
 impl<T: AsyncRead + AsyncWrite + Unpin> NoisePeer<T> {
@@ -23,11 +24,15 @@ impl<T: AsyncRead + AsyncWrite + Unpin> NoisePeer<T> {
         let mut tmp = vec![0u8; 65535];
         initiator.read_message(&in_msg, &mut tmp)?;
 
+        let hash = initiator.get_handshake_hash();
+        let fingerprint = crate::fingerprint::derive_fingerprint(hash);
+
         let transport = initiator.into_transport_mode()?;
         Ok(NoisePeer {
             stream,
             transport,
             read_buf: Vec::new(),
+            session_fingerprint: fingerprint,
         })
     }
 
@@ -43,11 +48,15 @@ impl<T: AsyncRead + AsyncWrite + Unpin> NoisePeer<T> {
         let len = responder.write_message(&[], &mut out_msg)?;
         send_frame(&mut stream, &out_msg[..len]).await?;
 
+        let hash = responder.get_handshake_hash();
+        let fingerprint = crate::fingerprint::derive_fingerprint(hash);
+
         let transport = responder.into_transport_mode()?;
         Ok(NoisePeer {
             stream,
             transport,
             read_buf: Vec::new(),
+            session_fingerprint: fingerprint,
         })
     }
 

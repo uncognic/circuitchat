@@ -25,6 +25,7 @@ The optional password authentication layer runs after the Noise handshake comple
 4. The listener sends its own proof: `HMAC-SHA256(key, "circuitchat-auth-responder")`
 5. The initiator verifies the listener's proof
 
+There is also a fingerprint which can be used to verify that the connection has not been intercepted.
 ## Local storage
 When `history.save = true`, messages are stored in `circuitchat.db` using XChaCha20-Poly1305 encryption per message, with a key derived via Argon2 from your passphrase.
 

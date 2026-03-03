@@ -45,6 +45,7 @@ pub struct App {
     pub pending_incoming_offer: Option<(String, u64, Option<Vec<u8>>)>,
     pub peer_typing: bool,
     pub pending_delivery: usize,
+    pub session_fingerprint: Option<String>,
 }
 
 impl App {
@@ -63,6 +64,7 @@ impl App {
             pending_incoming_offer: None,
             peer_typing: false,
             pending_delivery: 0,
+            session_fingerprint: None,
         }
     }
 
@@ -291,11 +293,16 @@ impl App {
         let inner_height = area.height.saturating_sub(2) as usize;
         self.visible_height = inner_height;
 
-        let block = Block::default()
+        let mut block = Block::default()
             .borders(Borders::ALL)
             .title(format!("circuitchat v{}", env!("CARGO_PKG_VERSION")))
-            .title_bottom(Line::from(format!(" {} ", self.status)).right_aligned())
             .border_style(Style::default().fg(Color::DarkGray));
+
+        if let Some(ref fp) = self.session_fingerprint {
+            if !fp.is_empty() {
+                block = block.title_bottom(format!("fp: {}", fp));
+            }
+        }
 
         let end = self.messages.len().min(self.scroll_offset + inner_height);
         let start = self.scroll_offset.min(end);
@@ -328,6 +335,7 @@ impl App {
 
         frame.render_widget(paragraph, area);
 
+        // top-right: menu hint (same as before)
         let label = "menu: alt+m";
         let w = (label.len() as u16).saturating_add(2);
         if area.width > w {
@@ -335,6 +343,19 @@ impl App {
             let rect = Rect::new(x, area.y, w, 1);
             let p = Paragraph::new(Line::from(Span::styled(label, Style::default())));
             frame.render_widget(p, rect);
+        }
+
+        let status_label = &self.status;
+        let sw = (status_label.len() as u16).saturating_add(2);
+        if area.width > sw {
+            let sx = area.x + area.width.saturating_sub(sw);
+            let sy = area.y + area.height.saturating_sub(1);
+            let srect = Rect::new(sx, sy, sw, 1);
+            let sp = Paragraph::new(Line::from(Span::styled(
+                status_label.clone(),
+                Style::default().fg(Color::DarkGray),
+            )));
+            frame.render_widget(sp, srect);
         }
     }
 
