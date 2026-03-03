@@ -99,6 +99,13 @@ where
     let mut pending_offer: Option<file_transfer::OutgoingFile> = None;
     let mut last_input_empty = true;
 
+    let mut ping_interval = tokio::time::interval(std::time::Duration::from_secs(15));
+    ping_interval.reset();
+    let mut last_pong = tokio::time::Instant::now();
+    let ping_timeout = std::time::Duration::from_secs(45);
+    let mut peer_responding = true;
+    let mut awaiting_ping_response = false;
+
     loop {
         terminal.draw(|f| app.draw(f))?;
 
@@ -175,9 +182,25 @@ where
         }
         // normal mode
         tokio::select! {
+            _ = ping_interval.tick() => {
+                if last_pong.elapsed() > ping_timeout {
+                    if peer_responding {
+                        peer_responding = false;
+                        let base = app.status.replace(" | peer not responding", "");
+                        app.status = format!("{} | peer not responding", base);
+                    }
+                }
+                awaiting_ping_response = false;
+                let _ = np.send(&file_transfer::encode_ping()).await;
+            }
             result = np.recv() => {
                 match result {
                     Ok(msg) => {
+                        last_pong = tokio::time::Instant::now();
+                        if !peer_responding {
+                            peer_responding = true;
+                            app.status = app.status.replace(" | peer not responding", "");
+                        }
                         match file_transfer::parse_message(&msg) {
 
                             file_transfer::ParsedMessage::Text(content) => {
@@ -303,6 +326,19 @@ where
                                     app.pending_delivery -= 1;
                                     app.mark_last_sent_delivered();
                                 }
+                            }
+                            file_transfer::ParsedMessage::Ping => {
+                                let _ = np.send(&file_transfer::encode_pong()).await;
+                            }
+                            file_transfer::ParsedMessage::Pong => {
+                                if awaiting_ping_response {
+                                    app.add_message(
+                                        MessageDirection::Received,
+                                        "Pong!".to_string(),
+                                        tui::now_timestamp(time_local, hour24, show_tz, show_seconds),
+                                    );
+                                }
+                                awaiting_ping_response = false;
                             }
                         }
                     }
@@ -438,7 +474,7 @@ where
                             } else if text == "/help" {
                                 app.add_message(
                                     MessageDirection::System,
-                                    "[help] available commands: /clear, /help, /status, /send".to_string(),
+                                    "[help] available commands: /clear, /help, /status, /send, /ping".to_string(),
                                     tui::now_timestamp(time_local, hour24, show_tz, show_seconds),
                                 );
                             } else if text == "/status" {
@@ -496,6 +532,14 @@ where
                                     history_line,
                                     ts,
                                 );
+                            } else if text == "/ping" {
+                                awaiting_ping_response = true;
+                                app.add_message(
+                                    MessageDirection::Sent,
+                                    "Ping?".to_string(),
+                                    tui::now_timestamp(time_local, hour24, show_tz, show_seconds),
+                                );
+                                let _ = np.send(&file_transfer::encode_ping()).await;
                             } else {
                                 let bytes = text.as_bytes().to_vec();
                                 if let Err(e) = np.send(&bytes).await {

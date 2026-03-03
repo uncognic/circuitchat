@@ -16,6 +16,8 @@ pub const MSG_FILE_REJECT: u8 = 0x06;
 pub const MSG_TYPING_START: u8 = 0x07;
 pub const MSG_TYPING_STOP: u8 = 0x08;
 pub const MSG_DELIVERED: u8 = 0x09;
+pub const MSG_PING: u8 = 0x0A;
+pub const MSG_PONG: u8 = 0x0B;
 
 pub fn encode_typing_start() -> Vec<u8> {
     vec![0x00, MSG_TYPING_START]
@@ -25,6 +27,12 @@ pub fn encode_typing_stop() -> Vec<u8> {
 }
 pub fn encode_delivered() -> Vec<u8> {
     vec![0x00, MSG_DELIVERED]
+}
+pub fn encode_ping() -> Vec<u8> {
+    vec![0x00, MSG_PING]
+}
+pub fn encode_pong() -> Vec<u8> {
+    vec![0x00, MSG_PONG]
 }
 //pub fn encode_accept() -> Vec<u8> {
 //    vec![0x00, MSG_FILE_ACCEPT]
@@ -83,6 +91,8 @@ pub enum ParsedMessage {
     TypingStart,
     TypingStop,
     Delivered,
+    Ping,
+    Pong,
 }
 
 pub fn parse_message(data: &[u8]) -> ParsedMessage {
@@ -114,6 +124,8 @@ pub fn parse_message(data: &[u8]) -> ParsedMessage {
             MSG_TYPING_START => ParsedMessage::TypingStart,
             MSG_TYPING_STOP => ParsedMessage::TypingStop,
             MSG_DELIVERED => ParsedMessage::Delivered,
+            MSG_PING => ParsedMessage::Ping,
+            MSG_PONG => ParsedMessage::Pong,
             _ => ParsedMessage::Text(String::from_utf8_lossy(data).to_string()),
         }
     } else {
