@@ -1,0 +1,27 @@
+# This is the default TOML configuration for circuitchat
+# It is configured for maximum privacy
+[identity]
+persist = false
+
+[history]
+save = false
+passphrase = ""
+
+[time]
+24h = true
+local = false
+show_tz = false
+show_seconds = false
+
+[auth]
+enabled = true
+password = "" # It will prompt you for a password on startup if auth is enabled and this is empty
+
+[privacy]
+typing_status = false
+read_receipts = false
+randomize_filenames = true
+
+[bridge]
+enabled = false
+lines = []
