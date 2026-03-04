@@ -40,6 +40,7 @@ struct StatusContext {
     identity_persist: bool,
     onion_addr: Option<String>,
     history_saving: bool,
+    peer_version: Option<(u8, u8, u8)>,
 }
 fn build_tor_config(
     persist: bool,
@@ -126,7 +127,7 @@ async fn chat_loop<T>(
     mut np: NoisePeer<T>,
     storage: &mut Option<Storage>,
     initial_status: &str,
-    status_ctx: &StatusContext,
+    status_ctx: &mut StatusContext,
     time_local: bool,
     hour24: bool,
     show_seconds: bool,
@@ -163,12 +164,8 @@ where
             patch,
         } = file_transfer::parse_message(&msg)
         {
+            status_ctx.peer_version = Some((major, minor, patch));
             let (our_major, our_minor, our_patch) = file_transfer::protocol_version();
-            app.add_message(
-                MessageDirection::System,
-                format!("peer protocol version: {}.{}.{}", major, minor, patch),
-                tui::now_timestamp(time_local, hour24, show_tz, show_seconds),
-            );
             if major != our_major || minor != our_minor || patch != our_patch {
                 let mut warn = format!(
                     "warning: peer protocol {}.{}.{} differs from local {}.{}.{}",
@@ -299,12 +296,9 @@ where
                         }
                         match file_transfer::parse_message(&msg) {
                             file_transfer::ParsedMessage::VersionNegotiate { major, minor, patch } => {
+                                status_ctx.peer_version = Some((major, minor, patch));
                                 let (our_major, our_minor, our_patch) = file_transfer::protocol_version();
-                                app.add_message(
-                                    MessageDirection::System,
-                                    format!("peer protocol version: {}.{}.{}", major, minor, patch),
-                                    tui::now_timestamp(time_local, hour24, show_tz, show_seconds),
-                                );
+
                                 if major != our_major || minor != our_minor || patch != our_patch {
                                     let mut warn = format!("warning: peer protocol {}.{}.{} differs from local {}.{}.{}", major, minor, patch, our_major, our_minor, our_patch);
                                     if major != our_major {
@@ -587,8 +581,6 @@ where
                             } else if text == "/clear" {
                                 app.messages.clear();
                             } else if text == "/panic" {
-                                // Take ownership of Storage so we can close the
-                                // SQLite handle before touching the file on disk.
                                 let owned_storage = storage.take();
                                 if let Err(e) = perform_panic_and_exit(owned_storage) {
                                     eprintln!("panic cleanup failed: {}", e);
@@ -623,6 +615,22 @@ where
                                         ts.clone(),
                                     );
                                 }
+                                let peer_version_str = if let Some((maj, min, pat)) = status_ctx.peer_version {
+                                    format!("{}.{}.{}", maj, min, pat)
+                                } else {
+                                    "unknown".to_string()
+                                };
+                                app.add_message(
+                                    MessageDirection::System,
+                                    format!("[status] peer protocol version: {}", peer_version_str),
+                                    tui::now_timestamp(time_local, hour24, show_tz, show_seconds),
+                                );
+                                let (our_major, our_minor, our_patch) = file_transfer::protocol_version();
+                                app.add_message(
+                                    MessageDirection::System,
+                                    format!("[status] protocol version: {}.{}.{}", our_major, our_minor, our_patch),
+                                    tui::now_timestamp(time_local, hour24, show_tz, show_seconds),
+                                );
                                 let identity_line = if status_ctx.identity_persist {
                                     "[status] identity: persistent".to_string()
                                 } else {
@@ -749,13 +757,14 @@ async fn run_initiator(
                     None
                 };
                 np.auth_initiator(auth_pw.as_deref()).await?;
-                let status_ctx = StatusContext {
+                let mut status_ctx = StatusContext {
                     bootstrap_secs: None,
                     bridges_configured: 0,
                     bridges_active: false,
                     identity_persist: storage.is_some(),
                     onion_addr: None,
                     history_saving: storage.is_some(),
+                    peer_version: None,
                 };
                 let mut password_owned = password;
                 password_owned.zeroize();
@@ -765,7 +774,7 @@ async fn run_initiator(
                     np,
                     &mut storage,
                     &initial_status,
-                    &status_ctx,
+                    &mut status_ctx,
                     time_local,
                     hour24,
                     show_seconds,
@@ -905,20 +914,21 @@ async fn run_responder(
         }
         let status = "connected".to_string();
 
-        let status_ctx = StatusContext {
+        let mut status_ctx = StatusContext {
             bootstrap_secs: None,
             bridges_configured: 0,
             bridges_active: false,
             identity_persist: storage.is_some(),
             onion_addr: Some(addr_str.clone()),
             history_saving: storage.is_some(),
+            peer_version: None,
         };
 
         if let Err(e) = chat_loop(
             np,
             &mut storage,
             &status,
-            &status_ctx,
+            &mut status_ctx,
             time_local,
             hour24,
             show_seconds,
