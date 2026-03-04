@@ -153,7 +153,38 @@ where
             }
         }
     }
-
+    let _ = np.send(&file_transfer::encode_version_negotiate()).await;
+    if let Ok(Ok(msg)) =
+        tokio::time::timeout(std::time::Duration::from_millis(250), np.recv()).await
+    {
+        if let file_transfer::ParsedMessage::VersionNegotiate {
+            major,
+            minor,
+            patch,
+        } = file_transfer::parse_message(&msg)
+        {
+            let (our_major, our_minor, our_patch) = file_transfer::protocol_version();
+            app.add_message(
+                MessageDirection::System,
+                format!("peer protocol version: {}.{}.{}", major, minor, patch),
+                tui::now_timestamp(time_local, hour24, show_tz, show_seconds),
+            );
+            if major != our_major || minor != our_minor || patch != our_patch {
+                let mut warn = format!(
+                    "warning: peer protocol {}.{}.{} differs from local {}.{}.{}",
+                    major, minor, patch, our_major, our_minor, our_patch
+                );
+                if major != our_major {
+                    warn = format!("INCOMPATIBLE MAJOR VERSION - {}", warn);
+                }
+                app.add_message(
+                    MessageDirection::System,
+                    warn,
+                    tui::now_timestamp(time_local, hour24, show_tz, show_seconds),
+                );
+            }
+        }
+    }
     let mut events = EventStream::new();
     let mut incoming_file: Option<file_transfer::IncomingFile> = None;
     let mut outgoing_file: Option<file_transfer::OutgoingFile> = None;
@@ -267,6 +298,25 @@ where
                             app.status = app.status.replace(" | peer not responding", "");
                         }
                         match file_transfer::parse_message(&msg) {
+                            file_transfer::ParsedMessage::VersionNegotiate { major, minor, patch } => {
+                                let (our_major, our_minor, our_patch) = file_transfer::protocol_version();
+                                app.add_message(
+                                    MessageDirection::System,
+                                    format!("peer protocol version: {}.{}.{}", major, minor, patch),
+                                    tui::now_timestamp(time_local, hour24, show_tz, show_seconds),
+                                );
+                                if major != our_major || minor != our_minor || patch != our_patch {
+                                    let mut warn = format!("warning: peer protocol {}.{}.{} differs from local {}.{}.{}", major, minor, patch, our_major, our_minor, our_patch);
+                                    if major != our_major {
+                                        warn = format!("INCOMPATIBLE MAJOR VERSION - {}", warn);
+                                    }
+                                    app.add_message(
+                                        MessageDirection::System,
+                                        warn,
+                                        tui::now_timestamp(time_local, hour24, show_tz, show_seconds),
+                                    );
+                                }
+                            }
 
                             file_transfer::ParsedMessage::Text(content) => {
                                 app.add_message(

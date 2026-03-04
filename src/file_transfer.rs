@@ -1,3 +1,18 @@
+pub const MSG_VERSION_NEGOTIATE: u8 = 0xFF;
+
+pub fn protocol_version() -> (u8, u8, u8) {
+    let v = env!("CARGO_PKG_VERSION");
+    let mut parts = v.split(|c| c == '.' || c == '-');
+    let major = parts.next().and_then(|s| s.parse::<u8>().ok()).unwrap_or(0);
+    let minor = parts.next().and_then(|s| s.parse::<u8>().ok()).unwrap_or(0);
+    let patch = parts.next().and_then(|s| s.parse::<u8>().ok()).unwrap_or(0);
+    (major, minor, patch)
+}
+
+pub fn encode_version_negotiate() -> Vec<u8> {
+    let (major, minor, patch) = protocol_version();
+    vec![0x00, MSG_VERSION_NEGOTIATE, major, minor, patch]
+}
 use rand::Rng;
 use rand::distributions::Alphanumeric;
 use std::error::Error;
@@ -97,11 +112,26 @@ pub enum ParsedMessage {
     Delivered,
     Ping,
     Pong,
+    VersionNegotiate {
+        major: u8,
+        minor: u8,
+        patch: u8,
+    },
 }
 
 pub fn parse_message(data: &[u8]) -> ParsedMessage {
     if data.len() >= 2 && data[0] == 0x00 {
         match data[1] {
+            MSG_VERSION_NEGOTIATE if data.len() >= 5 => {
+                let major = data[2];
+                let minor = data[3];
+                let patch = data[4];
+                ParsedMessage::VersionNegotiate {
+                    major,
+                    minor,
+                    patch,
+                }
+            }
             OFFER_TAG if data.len() >= 10 => {
                 let size = u64::from_be_bytes(data[2..10].try_into().unwrap());
                 if data.len() >= 18 {
