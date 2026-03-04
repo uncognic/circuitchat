@@ -2,7 +2,7 @@
 
 P2P encrypted messaging over Tor in Rust. Creates ephemeral onion services for chat using the [Noise Protocol Framework](https://noiseprotocol.org/). There is no server and no identity, it is meant to reduce metadata leakage.
 
-Main site: https://circuitchat.1707070.xyz
+Main site: https://circuitchat.1707070.xyz\
 Onion: http://si52lslgxgqnzom5bsbyr7axyj6r3ykelskahuuf36dxrzrbsppio5qd.onion/
 
 ![GIF of circuitchat](metadata/gif.gif)
