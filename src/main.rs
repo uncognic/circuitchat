@@ -160,6 +160,9 @@ where
             }
         }
     }
+    // perform an initial draw to establish `visible_height`, then scroll to bottom
+    terminal.draw(|f| app.draw(f))?;
+    app.scroll_to_bottom();
     let _ = np.send(&file_transfer::encode_version_negotiate()).await;
     if let Ok(Ok(msg)) =
         tokio::time::timeout(std::time::Duration::from_millis(250), np.recv()).await
@@ -1011,7 +1014,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
         );
         std::process::exit(2);
     }
-
+    println!("circuitchat v{}", env!("CARGO_PKG_VERSION"));
     let cfg = config::load_or_create()?;
     let mut passphrase = config::resolve_passphrase(&cfg)?;
     let auth_password = config::resolve_auth_password(&cfg)?;

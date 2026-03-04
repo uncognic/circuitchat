@@ -135,7 +135,7 @@ impl App {
         self.recv_progress = None;
     }
 
-    fn scroll_to_bottom(&mut self) {
+    pub fn scroll_to_bottom(&mut self) {
         let total = self.messages.len();
         if total > self.visible_height && self.visible_height > 0 {
             self.scroll_offset = total - self.visible_height;
@@ -308,7 +308,12 @@ impl App {
     }
 
     fn draw_messages(&mut self, frame: &mut Frame, area: Rect) {
-        let inner_height = area.height.saturating_sub(2) as usize;
+        let mut inner_height = area.height.saturating_sub(2) as usize;
+        if let Some(ref fp) = self.session_fingerprint {
+            if !fp.is_empty() {
+                inner_height = inner_height.saturating_sub(1);
+            }
+        }
         self.visible_height = inner_height;
 
         let mut block = Block::default()
@@ -480,6 +485,25 @@ impl App {
             crate::file_transfer::format_size(speed_bps as u64)
         );
 
+        let eta_line = {
+            let remaining = t.size.saturating_sub(t.transferred) as f64;
+            if speed_bps > 0.0 && remaining > 0.0 {
+                let secs = (remaining / speed_bps).round() as u64;
+                let h = secs / 3600;
+                let m = (secs % 3600) / 60;
+                let s = secs % 60;
+                if h > 0 {
+                    format!(" ETA: {:02}:{:02}:{:02}", h, m, s)
+                } else {
+                    format!(" ETA: {:02}:{:02}", m, s)
+                }
+            } else if t.transferred == 0 && t.size > 0 {
+                " ETA: calculating...".to_string()
+            } else {
+                " ETA: --:--".to_string()
+            }
+        };
+
         let (title, color, hint) = if is_send {
             (" sending File ", Color::Yellow, " Esc to cancel")
         } else {
@@ -499,6 +523,7 @@ impl App {
             )),
             Line::from(size_line),
             Line::from(speed_line),
+            Line::from(eta_line),
             Line::from(bar),
             Line::from(""),
             Line::from(Span::styled(hint, Style::default().fg(Color::DarkGray))),
