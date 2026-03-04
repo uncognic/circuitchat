@@ -12,6 +12,10 @@ persist = false
 save = false
 passphrase = ""
 
+[ui]
+mention_notification_sound = false
+message_notification_sound = false
+
 [time]
 24h = true
 local = false
@@ -47,6 +51,12 @@ lines = []
 
 > **Note:** setting `history.save = true` without `identity.persist = true` has no effect and will print a warning at startup.
 
+## `[ui]`
+
+| Key | Type | Default | Description |
+|-----|------|---------|-------------|
+| `mention_notification_sound` | bool | `false` | Play a sound when you are mentioned in a message. |
+| `message_notification_sound` | bool | `false` | Play a sound when a new message is received. |
 
 ## `[time]`
 

@@ -7,10 +7,16 @@ use std::path::PathBuf;
 pub struct Config {
     pub identity: IdentityConfig,
     pub history: HistoryConfig,
+    pub ui: UiConfig,
     pub time: TimeConfig,
     pub auth: AuthConfig,
     pub privacy: PrivacyConfig,
     pub bridge: BridgeConfig,
+}
+#[derive(Debug, Serialize, Deserialize)]
+pub struct UiConfig {
+    pub message_notification_sound: bool,
+    pub mention_notification_sound: bool,
 }
 #[derive(Debug, Serialize, Deserialize)]
 pub struct BridgeConfig {
@@ -71,6 +77,10 @@ impl Default for Config {
                 save: false,
                 passphrase: String::new(),
             },
+            ui: UiConfig {
+                message_notification_sound: true,
+                mention_notification_sound: true,
+            },
             time: TimeConfig {
                 hour24: true,
                 local: false,
@@ -93,8 +103,6 @@ impl Default for Config {
         }
     }
 }
-
-
 
 pub fn config_path() -> Result<PathBuf, Box<dyn Error>> {
     let exe_dir = std::env::current_exe()?
@@ -130,7 +138,6 @@ pub fn load_or_create() -> Result<Config, Box<dyn Error>> {
             std::fs::write(&path, contents)?;
             println!("updated config with new fields at {}", path.display());
         }
-
 
         Ok(config)
     } else {

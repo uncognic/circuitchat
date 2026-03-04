@@ -135,12 +135,18 @@ async fn chat_loop<T>(
     typing_indicators: bool,
     delivery_receipts: bool,
     randomize_filenames: bool,
+    message_notification_sound: bool,
+    mention_notification_sound: bool,
 ) -> Result<(), Box<dyn Error>>
 where
     T: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send + Sized + 'static,
 {
     let mut terminal = ratatui::init();
-    let mut app = tui::App::new(initial_status);
+    let mut app = tui::App::new(
+        initial_status,
+        message_notification_sound,
+        mention_notification_sound,
+    );
     app.session_fingerprint = Some(np.session_fingerprint.clone());
 
     if let Some(ref s) = *storage {
@@ -726,6 +732,8 @@ async fn run_initiator(
     typing_indicators: bool,
     delivery_receipts: bool,
     randomize_filenames: bool,
+    message_notification_sound: bool,
+    mention_notification_sound: bool,
 ) -> Result<(), Box<dyn Error>> {
     let mut prefs = StreamPrefs::new();
     prefs.connect_to_onion_services(arti_client::config::BoolOrAuto::Explicit(true));
@@ -782,6 +790,8 @@ async fn run_initiator(
                     typing_indicators,
                     delivery_receipts,
                     randomize_filenames,
+                    message_notification_sound,
+                    mention_notification_sound,
                 )
                 .await;
             }
@@ -810,6 +820,8 @@ async fn run_responder(
     typing_indicators: bool,
     delivery_receipts: bool,
     randomize_filenames: bool,
+    message_notification_sound: bool,
+    mention_notification_sound: bool,
 ) -> Result<(), Box<dyn Error>> {
     let config = OnionServiceConfigBuilder::default()
         .nickname("circuitchat".to_owned().try_into()?)
@@ -936,6 +948,8 @@ async fn run_responder(
             typing_indicators,
             delivery_receipts,
             randomize_filenames,
+            message_notification_sound,
+            mention_notification_sound,
         )
         .await
         {
@@ -1047,6 +1061,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
                 cfg.privacy.typing_status,
                 cfg.privacy.read_receipts,
                 cfg.privacy.randomize_filenames,
+                cfg.ui.message_notification_sound,
+                cfg.ui.mention_notification_sound,
             )
             .await?;
         }
@@ -1063,6 +1079,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
                 cfg.privacy.typing_status,
                 cfg.privacy.read_receipts,
                 cfg.privacy.randomize_filenames,
+                cfg.ui.message_notification_sound,
+                cfg.ui.mention_notification_sound,
             )
             .await?;
         }

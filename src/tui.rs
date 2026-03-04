@@ -48,10 +48,16 @@ pub struct App {
     pub peer_typing: bool,
     pub pending_delivery: usize,
     pub session_fingerprint: Option<String>,
+    pub message_notification_sound: bool,
+    pub mention_notification_sound: bool,
 }
 
 impl App {
-    pub fn new(status: &str) -> Self {
+    pub fn new(
+        status: &str,
+        message_notification_sound: bool,
+        mention_notification_sound: bool,
+    ) -> Self {
         Self {
             messages: Vec::new(),
             input: String::new(),
@@ -67,12 +73,15 @@ impl App {
             peer_typing: false,
             pending_delivery: 0,
             session_fingerprint: None,
+            message_notification_sound,
+            mention_notification_sound,
         }
     }
 
     pub fn add_message(&mut self, direction: MessageDirection, content: String, timestamp: String) {
-        let should_bell =
-            matches!(direction, MessageDirection::Received) && content.contains("@peer");
+        let should_bell = matches!(direction, MessageDirection::Received)
+            && (self.message_notification_sound
+                || (content.contains("@peer") && self.mention_notification_sound));
 
         self.messages.push(ChatMessage {
             direction,

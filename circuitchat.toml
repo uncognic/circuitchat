@@ -7,6 +7,10 @@ persist = false
 save = false
 passphrase = ""
 
+[ui]
+mention_notification_sound = false
+message_notification_sound = false
+
 [time]
 24h = true
 local = false
