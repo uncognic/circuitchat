@@ -9,6 +9,7 @@ use ratatui::{
     widgets::{Block, Borders, Paragraph, Wrap},
 };
 use std::io::{self, Write};
+use std::time::Instant;
 pub struct ChatMessage {
     pub direction: MessageDirection,
     pub content: String,
@@ -19,6 +20,7 @@ pub struct TransferProgress {
     pub name: String,
     pub size: u64,
     pub transferred: u64,
+    pub start: Instant,
 }
 
 impl TransferProgress {
@@ -91,6 +93,7 @@ impl App {
             name,
             size,
             transferred: 0,
+            start: Instant::now(),
         });
     }
 
@@ -109,6 +112,7 @@ impl App {
             name,
             size,
             transferred: 0,
+            start: Instant::now(),
         });
     }
 
@@ -423,7 +427,7 @@ impl App {
 
         let area = frame.area();
         let mw = 52u16.min(area.width.saturating_sub(4));
-        let mh = 8u16.min(area.height.saturating_sub(4));
+        let mh = 10u16.min(area.height.saturating_sub(4));
         let mx = area.x + (area.width.saturating_sub(mw)) / 2;
         let my = area.y + (area.height.saturating_sub(mh)) / 2;
         let rect = Rect::new(mx, my, mw, mh);
@@ -434,7 +438,9 @@ impl App {
         let filler = Paragraph::new(fill_lines).style(Style::default().bg(Color::Black));
         frame.render_widget(filler, rect);
         let pct = t.pct();
-        let bar_inner = (mw as usize).saturating_sub(8);
+        let pct_text = format!("{}%", pct);
+        let reserved = 12 + pct_text.len();
+        let bar_inner = (mw as usize).saturating_sub(reserved);
         let filled = if t.size == 0 {
             bar_inner
         } else {
@@ -454,10 +460,21 @@ impl App {
             crate::file_transfer::format_size(t.size)
         );
 
-        let (title, color, hint) = if is_send {
-            (" Sending File ", Color::Yellow, " Esc to cancel")
+        let elapsed = t.start.elapsed();
+        let speed_bps = if elapsed.as_secs_f64() > 0.0 {
+            (t.transferred as f64) / elapsed.as_secs_f64()
         } else {
-            (" Receiving File ", Color::Cyan, " /cancel to abort")
+            0.0
+        };
+        let speed_line = format!(
+            " speed: {}/s",
+            crate::file_transfer::format_size(speed_bps as u64)
+        );
+
+        let (title, color, hint) = if is_send {
+            (" sending File ", Color::Yellow, " Esc to cancel")
+        } else {
+            (" receiving File ", Color::Cyan, " /cancel to abort")
         };
 
         let block = Block::default()
@@ -472,6 +489,7 @@ impl App {
                 Style::default().add_modifier(Modifier::BOLD),
             )),
             Line::from(size_line),
+            Line::from(speed_line),
             Line::from(bar),
             Line::from(""),
             Line::from(Span::styled(hint, Style::default().fg(Color::DarkGray))),
