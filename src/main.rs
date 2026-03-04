@@ -985,9 +985,14 @@ async fn main() -> Result<(), Box<dyn Error>> {
         return Ok(());
     }
 
+    if args.iter().any(|a| a == "--version") {
+        println!("circuitchat v{}", env!("CARGO_PKG_VERSION"));
+        return Ok(());
+    }
+
     if args.len() < 2 {
         eprintln!(
-            "usage: {} (initiate <onion_addr> | listen) [--reset]",
+            "usage: {} (initiate <onion_addr> | listen) [--reset, --version]",
             args[0]
         );
         std::process::exit(2);
