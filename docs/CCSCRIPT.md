@@ -70,6 +70,7 @@ conditions only appear inside if/end blocks. they operate on the current event's
 - `reject`: reject incoming file offer (file event only)
 - `disconnect`: close the session
 - `wait <ms>`: pause for N milliseconds before continuing
+- `send_file <path>`: offer a file to the peer
 
 ## Variables
 

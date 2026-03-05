@@ -1,0 +1,14 @@
+on connect
+    reply "hello, bot connected"
+    reply "running circuitchat v${version}"
+    reply "file example"
+end
+
+on message
+    if starts_with "!help"
+        reply "commands: !file, !help"
+    end
+    if starts_with "!file"
+        send_file "TODO.md"
+    end
+end

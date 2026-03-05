@@ -31,6 +31,7 @@ pub enum Condition {
 pub enum Action {
     Reply(String),
     Log(String),
+    SendFile(String),
     Accept,
     Reject,
     Disconnect,
@@ -299,6 +300,13 @@ fn parse_action(s: &str, line: usize) -> Result<Action, ParseError> {
             message: format!("invalid wait duration '{}'", rest.trim()),
         })?;
         return Ok(Action::Wait(ms));
+    }
+    if let Some(rest) = s.strip_prefix("send_file ") {
+        let text = extract_quoted_string(rest.trim()).ok_or_else(|| ParseError {
+            line,
+            message: "unterminated string".to_string(),
+        })?;
+        return Ok(Action::SendFile(text));
     }
     if s == "accept" {
         return Ok(Action::Accept);
