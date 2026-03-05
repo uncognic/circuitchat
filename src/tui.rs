@@ -358,7 +358,6 @@ impl App {
 
         frame.render_widget(paragraph, area);
 
-        // top-right: menu hint (same as before)
         let label = "menu: alt+m";
         let w = (label.len() as u16).saturating_add(2);
         if area.width > w {

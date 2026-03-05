@@ -5,7 +5,6 @@
 - PROTOCOL.md
 - more features for the bot
 - AUR package (would be cool)
-- Tor hidden service for the website itself, and hosting downloads there
 - show the current characters inputted / character limit in the tui
 - some sort of message expiry, where peers agree to delete messages older than X time
 
