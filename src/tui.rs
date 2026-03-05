@@ -550,6 +550,23 @@ impl App {
 
         let chars_before = self.input[..self.cursor_position].chars().count();
         frame.set_cursor_position((area.x + 1 + 2 + chars_before as u16, area.y + 1));
+
+        let count = self.input.chars().count();
+        let max: usize = 50000;
+        let count_label = format!(" {}/{}", count, max);
+        let w = count_label.len() as u16 + 2;
+        if area.width > w {
+            let x = area.x + area.width.saturating_sub(w);
+            let y = area.y + 1;
+            let rect = Rect::new(x, y, w, 1);
+            let style = if count > max {
+                Style::default().fg(Color::Red)
+            } else {
+                Style::default().fg(Color::DarkGray)
+            };
+            let p = Paragraph::new(Line::from(Span::styled(count_label, style)));
+            frame.render_widget(p, rect);
+        }
     }
     pub fn mark_last_sent_delivered(&mut self) {
         for msg in self.messages.iter_mut().rev() {
