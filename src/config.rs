@@ -28,6 +28,8 @@ pub struct PrivacyConfig {
     pub typing_status: bool,
     pub read_receipts: bool,
     pub randomize_filenames: bool,
+    #[serde(alias = "session_timeout_minutes")]
+    pub session_timeout_mins: u64,
 }
 #[derive(Debug, Serialize, Deserialize)]
 pub struct AuthConfig {
@@ -95,6 +97,7 @@ impl Default for Config {
                 typing_status: false,
                 read_receipts: false,
                 randomize_filenames: true,
+                session_timeout_mins: 0,
             },
             bridge: BridgeConfig {
                 enabled: false,

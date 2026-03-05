@@ -25,6 +25,7 @@ password = "" # It will prompt you for a password on startup if auth is enabled 
 typing_status = false
 read_receipts = false
 randomize_filenames = true
+session_timeout_mins = 0 # 0 means no timeout
 
 [bridge]
 enabled = false

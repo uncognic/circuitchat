@@ -139,6 +139,7 @@ async fn chat_loop<T>(
     randomize_filenames: bool,
     message_notification_sound: bool,
     mention_notification_sound: bool,
+    session_timeout_mins: u64,
 ) -> Result<(), Box<dyn Error>>
 where
     T: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send + Sized + 'static,
@@ -150,6 +151,18 @@ where
         mention_notification_sound,
     );
     app.session_fingerprint = Some(np.session_fingerprint.clone());
+
+    let session_deadline_tokio = if session_timeout_mins > 0 {
+        Some(tokio::time::Instant::now() + std::time::Duration::from_secs(session_timeout_mins * 60))
+    } else {
+        None
+    };
+    let session_deadline_std = if session_timeout_mins > 0 {
+        Some(std::time::Instant::now() + std::time::Duration::from_secs(session_timeout_mins * 60))
+    } else {
+        None
+    };
+    app.session_deadline = session_deadline_std;
 
     if let Some(ref s) = *storage {
         if let Ok(messages) = s.load_history() {
@@ -200,6 +213,8 @@ where
 
     let mut ping_interval = tokio::time::interval(std::time::Duration::from_secs(15));
     ping_interval.reset();
+    let mut session_tick = tokio::time::interval(std::time::Duration::from_secs(1));
+    session_tick.reset();
     let mut last_pong = tokio::time::Instant::now();
     let ping_timeout = std::time::Duration::from_secs(45);
     let mut peer_responding = true;
@@ -285,6 +300,9 @@ where
         }
         // normal mode
         tokio::select! {
+            _ = session_tick.tick() => {
+                terminal.draw(|f| app.draw(f))?;
+            }
             _ = ping_interval.tick() => {
                 if last_pong.elapsed() > ping_timeout {
                     if peer_responding {
@@ -295,6 +313,19 @@ where
                 }
                 awaiting_ping_response = false;
                 let _ = np.send(&file_transfer::encode_ping()).await;
+            }
+            _ = async {
+                if let Some(deadline) = session_deadline_tokio {
+                    tokio::time::sleep_until(deadline).await
+                } else {
+                    std::future::pending().await
+                }
+            } => {
+                ratatui::restore();
+                let owned_storage = storage.take();
+                if let Err(e) = perform_panic_and_exit(owned_storage) {
+                    eprintln!("session timeout cleanup failed: {}", e);
+                }
             }
             result = np.recv() => {
                 match result {
@@ -796,6 +827,7 @@ async fn run_initiator(
                     randomize_filenames,
                     message_notification_sound,
                     mention_notification_sound,
+                    crate::config::load_or_create()?.privacy.session_timeout_mins,
                 )
                 .await;
             }
@@ -954,6 +986,7 @@ async fn run_responder(
             randomize_filenames,
             message_notification_sound,
             mention_notification_sound,
+            crate::config::load_or_create()?.privacy.session_timeout_mins,
         )
         .await
         {

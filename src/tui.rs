@@ -50,6 +50,7 @@ pub struct App {
     pub session_fingerprint: Option<String>,
     pub message_notification_sound: bool,
     pub mention_notification_sound: bool,
+    pub session_deadline: Option<std::time::Instant>,
 }
 
 impl App {
@@ -75,6 +76,7 @@ impl App {
             session_fingerprint: None,
             message_notification_sound,
             mention_notification_sound,
+            session_deadline: None,
         }
     }
 
@@ -367,7 +369,19 @@ impl App {
             frame.render_widget(p, rect);
         }
 
-        let status_label = &self.status;
+        let mut status_label = self.status.clone();
+        if let Some(deadline) = self.session_deadline {
+            let now = std::time::Instant::now();
+            if deadline > now {
+                let rem = deadline.duration_since(now);
+                let m = rem.as_secs() / 60;
+                let s = rem.as_secs() % 60;
+                status_label = format!("{} | session expires in {}m {}s", self.status, m, s);
+            } else {
+                status_label = format!("{} | session expired", self.status);
+            }
+        }
+
         let sw = (status_label.len() as u16).saturating_add(2);
         if area.width > sw {
             let sx = area.x + area.width.saturating_sub(sw);
