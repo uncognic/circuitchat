@@ -1,0 +1,287 @@
+use std::error::Error;
+
+use crate::ccscript::{self, Action, Block, Event, EventContext, Script};
+use crate::file_transfer;
+use crate::noise_peer::NoisePeer;
+
+pub struct ActionOutcome {
+    pub replies: Vec<String>,
+    pub waits: Vec<u64>,
+    pub accept_file: bool,
+    pub reject_file: bool,
+    pub disconnect: bool,
+}
+
+fn run_handlers(script: &Script, event: &Event, ctx: &EventContext) -> ActionOutcome {
+    let mut outcome = ActionOutcome {
+        replies: Vec::new(),
+        waits: Vec::new(),
+        accept_file: false,
+        reject_file: false,
+        disconnect: false,
+    };
+
+    for handler in &script.handlers {
+        if handler.event != *event {
+            continue;
+        }
+
+        for block in &handler.blocks {
+            match block {
+                Block::Conditional { condition, actions } => {
+                    if ccscript::eval_condition(condition, ctx) {
+                        for action in actions {
+                            apply_action(action, ctx, &mut outcome, event);
+                        }
+                    }
+                }
+                Block::Unconditional(action) => {
+                    apply_action(action, ctx, &mut outcome, event);
+                }
+            }
+        }
+    }
+
+    outcome
+}
+
+fn apply_action(action: &Action, ctx: &EventContext, outcome: &mut ActionOutcome, event: &Event) {
+    match action {
+        Action::Reply(template) => {
+            let text = ccscript::expand_variables(template, ctx);
+            outcome.replies.push(text);
+        }
+        Action::Log(template) => {
+            let text = ccscript::expand_variables(template, ctx);
+            println!("{}", text);
+        }
+        Action::Wait(ms) => {
+            outcome.waits.push(*ms);
+        }
+        Action::Accept => {
+            if *event == Event::File {
+                outcome.accept_file = true;
+            } else {
+                eprintln!("runtime error: 'accept' used outside file event, skipping");
+            }
+        }
+        Action::Reject => {
+            if *event == Event::File {
+                outcome.reject_file = true;
+            } else {
+                eprintln!("runtime error: 'reject' used outside file event, skipping");
+            }
+        }
+        Action::Disconnect => {
+            outcome.disconnect = true;
+        }
+    }
+}
+
+async fn send_outcome<T>(
+    np: &mut NoisePeer<T>,
+    outcome: &ActionOutcome,
+) -> Result<(), Box<dyn Error>>
+where
+    T: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send + 'static,
+{
+    for ms in &outcome.waits {
+        tokio::time::sleep(std::time::Duration::from_millis(*ms)).await;
+    }
+    for reply in &outcome.replies {
+        np.send(reply.as_bytes()).await?;
+    }
+    Ok(())
+}
+
+pub async fn run_bot_session<T>(
+    mut np: NoisePeer<T>,
+    script: &Script,
+    bot_start: std::time::Instant,
+    connection_count: u64,
+) -> Result<(), Box<dyn Error>>
+where
+    T: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send + 'static,
+{
+    let fingerprint = np.session_fingerprint.clone();
+
+    let _ = np.send(&file_transfer::encode_version_negotiate()).await;
+
+    if let Ok(Ok(msg)) =
+        tokio::time::timeout(std::time::Duration::from_millis(250), np.recv()).await
+    {
+        if let file_transfer::ParsedMessage::VersionNegotiate {
+            major,
+            minor: _,
+            patch: _,
+        } = file_transfer::parse_message(&msg)
+        {
+            let (our_major, _, _) = file_transfer::protocol_version();
+            if major != our_major {
+                eprintln!("warning: peer has incompatible major protocol version");
+            }
+        }
+    }
+
+    let ctx = EventContext::new_with_bot_state(
+        Some(fingerprint.clone()),
+        Some(bot_start),
+        connection_count,
+    );
+    let outcome = run_handlers(script, &Event::Connect, &ctx);
+    send_outcome(&mut np, &outcome).await?;
+    if outcome.disconnect {
+        return Ok(());
+    }
+
+    let mut incoming_file: Option<file_transfer::IncomingFile> = None;
+
+    loop {
+        if incoming_file.is_some() {
+            match np.recv().await {
+                Ok(msg) => match file_transfer::parse_message(&msg) {
+                    file_transfer::ParsedMessage::FileChunk(data) => {
+                        if let Some(ref mut inc) = incoming_file {
+                            if let Err(e) = inc.write_chunk(&data) {
+                                eprintln!("file write error: {}", e);
+                                incoming_file = None;
+                            }
+                        }
+                    }
+                    file_transfer::ParsedMessage::FileDone => {
+                        if let Some(inc) = incoming_file.take() {
+                            let name = inc.name.clone();
+                            let size = inc.size;
+                            match inc.finish() {
+                                Ok(path) => {
+                                    println!(
+                                        "[file] saved {} ({}) -> {}",
+                                        name,
+                                        file_transfer::format_size(size),
+                                        path.display()
+                                    );
+                                }
+                                Err(e) => eprintln!("file save error: {}", e),
+                            }
+                        }
+                    }
+                    file_transfer::ParsedMessage::FileCancel => {
+                        if let Some(inc) = incoming_file.take() {
+                            inc.cancel();
+                            println!("[file] peer cancelled the transfer");
+                        }
+                    }
+                    _ => {}
+                },
+                Err(_) => {
+                    fire_disconnect(script, &mut np, &fingerprint, bot_start, connection_count)
+                        .await;
+                    break;
+                }
+            }
+            continue;
+        }
+
+        match np.recv().await {
+            Ok(msg) => match file_transfer::parse_message(&msg) {
+                file_transfer::ParsedMessage::Text(content) => {
+                    let mut ctx = EventContext::new_with_bot_state(
+                        Some(fingerprint.clone()),
+                        Some(bot_start),
+                        connection_count,
+                    );
+                    ctx.message = Some(content);
+                    let outcome = run_handlers(script, &Event::Message, &ctx);
+                    send_outcome(&mut np, &outcome).await?;
+                    if outcome.disconnect {
+                        fire_disconnect(script, &mut np, &fingerprint, bot_start, connection_count)
+                            .await;
+                        return Ok(());
+                    }
+                }
+                file_transfer::ParsedMessage::FileOffer {
+                    name,
+                    size,
+                    checksum,
+                } => {
+                    let mut ctx = EventContext::new_with_bot_state(
+                        Some(fingerprint.clone()),
+                        Some(bot_start),
+                        connection_count,
+                    );
+                    ctx.file_name = Some(name.clone());
+                    ctx.file_size = Some(size);
+                    let outcome = run_handlers(script, &Event::File, &ctx);
+                    send_outcome(&mut np, &outcome).await?;
+                    if outcome.accept_file {
+                        let existing = file_transfer::existing_download_size(&name).unwrap_or(0);
+                        np.send(&file_transfer::encode_accept_with_offset(existing))
+                            .await?;
+                        match file_transfer::IncomingFile::begin(&name, size, checksum.as_deref()) {
+                            Ok(inc) => {
+                                println!(
+                                    "[file] accepted {} ({})",
+                                    name,
+                                    file_transfer::format_size(size)
+                                );
+                                incoming_file = Some(inc);
+                            }
+                            Err(e) => eprintln!("file receive error: {}", e),
+                        }
+                    } else if outcome.reject_file {
+                        np.send(&file_transfer::encode_reject()).await?;
+                        println!("[file] rejected {}", name);
+                    }
+                    if outcome.disconnect {
+                        fire_disconnect(script, &mut np, &fingerprint, bot_start, connection_count)
+                            .await;
+                        return Ok(());
+                    }
+                }
+                file_transfer::ParsedMessage::Ping => {
+                    let _ = np.send(&file_transfer::encode_pong()).await;
+                }
+                file_transfer::ParsedMessage::VersionNegotiate {
+                    major,
+                    minor,
+                    patch,
+                } => {
+                    let (our_major, our_minor, our_patch) = file_transfer::protocol_version();
+                    if major != our_major {
+                        eprintln!(
+                            "warning: incompatible peer version {}.{}.{} (ours {}.{}.{})",
+                            major, minor, patch, our_major, our_minor, our_patch
+                        );
+                    }
+                }
+                _ => {}
+            },
+            Err(_) => {
+                fire_disconnect(script, &mut np, &fingerprint, bot_start, connection_count).await;
+                break;
+            }
+        }
+    }
+
+    Ok(())
+}
+
+async fn fire_disconnect<T>(
+    script: &Script,
+    np: &mut NoisePeer<T>,
+    fingerprint: &str,
+    bot_start: std::time::Instant,
+    connection_count: u64,
+) where
+    T: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send + 'static,
+{
+    let ctx = EventContext::new_with_bot_state(
+        Some(fingerprint.to_string()),
+        Some(bot_start),
+        connection_count,
+    );
+    let outcome = run_handlers(script, &Event::Disconnect, &ctx);
+    for reply in &outcome.replies {
+        let _ = np.send(reply.as_bytes()).await;
+    }
+}

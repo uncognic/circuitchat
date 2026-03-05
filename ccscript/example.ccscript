@@ -1,0 +1,55 @@
+// greet on connect
+on connect
+    reply "hello, bot connected"
+    reply "running circuitchat v${version}"
+end
+
+// respond to commands
+on message
+    if starts_with "!help"
+        reply "commands: !help, !time, !echo, !info, !uptime"
+    end
+
+    if starts_with "!time"
+        reply "current time: ${time} (${weekday}, ${date})"
+    end
+
+    if starts_with "!echo "
+        reply "${message}"
+    end
+
+    if starts_with "!info"
+        reply "fingerprint: ${fingerprint}"
+        reply "connections: ${connections} | uptime: ${uptime}"
+        reply "your message was ${message_length} chars, ${message_words} words"
+    end
+
+    if starts_with "!uptime"
+        reply "bot has been running for ${uptime} (${uptime_secs}s)"
+    end
+
+    if equals "ping"
+        reply "pong"
+    end
+
+    if message_length > 500
+        reply "that's a long message (${message_length} chars)"
+    end
+end
+
+// auto-reject executables, accept everything else
+on file
+    if file_name ends_with ".exe"
+        reject
+        log "[${datetime}] rejected exe: ${file_name}"
+    end
+    if not file_name ends_with ".exe"
+        accept
+        log "[${datetime}] accepted file: ${file_name} (${file_size_fmt})"
+    end
+end
+
+// log disconnects
+on disconnect
+    log "[${datetime}] peer disconnected (session fingerprint: ${fingerprint})"
+end

@@ -1,0 +1,26 @@
+on connect
+    reply "hello, bot connected"
+end
+
+on message
+    if starts_with "!help"
+        reply "commands: !help, !time"
+    end
+    if starts_with "!time"
+        reply "time is ${time}"
+    end
+    if equals "ping"
+        reply "pong"
+    end
+end
+
+on file
+    if file_name ends_with ".exe"
+        reject
+        log "rejected exe: ${file_name}"
+    end
+end
+
+on disconnect
+    log "peer disconnected"
+end

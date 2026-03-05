@@ -13,6 +13,8 @@ use tor_rtcompat::PreferredRuntime;
 
 use tor_hsservice::status::State;
 
+mod bot;
+mod ccscript;
 mod config;
 mod file_transfer;
 mod fingerprint;
@@ -160,7 +162,6 @@ where
             }
         }
     }
-    // perform an initial draw to establish `visible_height`, then scroll to bottom
     terminal.draw(|f| app.draw(f))?;
     app.scroll_to_bottom();
     let _ = np.send(&file_transfer::encode_version_negotiate()).await;
@@ -1007,9 +1008,13 @@ async fn main() -> Result<(), Box<dyn Error>> {
         return Ok(());
     }
 
+    if args.len() >= 3 && args[1] == "bot" {
+        return run_bot_mode(&args[2]).await;
+    }
+
     if args.len() < 2 {
         eprintln!(
-            "usage: {} (initiate <onion_addr> | listen) [--reset, --version]",
+            "usage: {} (initiate <onion_addr> | listen | bot <script.ccscript>) [--reset, --version]",
             args[0]
         );
         std::process::exit(2);
@@ -1090,6 +1095,159 @@ async fn main() -> Result<(), Box<dyn Error>> {
         _ => {
             eprintln!("unknown mode: {}", args[1]);
             std::process::exit(2);
+        }
+    }
+
+    Ok(())
+}
+
+async fn run_bot_mode(script_path: &str) -> Result<(), Box<dyn Error>> {
+    let source = std::fs::read_to_string(script_path).map_err(|e| {
+        eprintln!("cannot read script '{}': {}", script_path, e);
+        e
+    })?;
+
+    let script = match ccscript::parse(&source) {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("{}", e);
+            std::process::exit(1);
+        }
+    };
+
+    println!("circuitchat v{} [bot mode]", env!("CARGO_PKG_VERSION"));
+    println!(
+        "loaded {} handler(s) from {}",
+        script.handlers.len(),
+        script_path
+    );
+
+    let cfg = config::load_or_create()?;
+    let mut passphrase = config::resolve_passphrase(&cfg)?;
+    let auth_password = config::resolve_auth_password(&cfg)?;
+
+    let storage = match passphrase {
+        Some(ref p) if cfg.identity.persist => Some(storage::Storage::open(p)?),
+        _ => None,
+    };
+    drop(storage);
+
+    if let Some(ref mut p) = passphrase {
+        p.zeroize();
+    }
+
+    let tor_config = build_tor_config(cfg.identity.persist, &cfg.bridge)?;
+
+    println!("bootstrapping tor...");
+    let start = std::time::Instant::now();
+    let tor = TorClient::<PreferredRuntime>::create_bootstrapped(tor_config).await?;
+    println!("tor bootstrapped in {:.1}s", start.elapsed().as_secs_f64());
+
+    println!("starting bot in listen mode...");
+
+    let svc_config = tor_hsservice::config::OnionServiceConfigBuilder::default()
+        .nickname("circuitchat".to_owned().try_into()?)
+        .build()?;
+
+    let (service, rend_requests) = tor
+        .launch_onion_service(svc_config)?
+        .ok_or("onion services disabled in config")?;
+
+    let onion_addr = loop {
+        if let Some(addr) = service.onion_address() {
+            break addr;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+    };
+
+    let addr_str = format!("{}", onion_addr.display_unredacted());
+    println!("bot address: {}", addr_str);
+    println!("publishing descriptor...");
+
+    let mut status_events = service.status_events();
+    let mut last_state = None;
+    loop {
+        if service.status().state().is_fully_reachable() {
+            break;
+        }
+        match tokio::time::timeout(std::time::Duration::from_secs(10), status_events.next()).await {
+            Ok(Some(status)) => {
+                use tor_hsservice::status::State;
+                match status.state() {
+                    State::Running | State::DegradedReachable => break,
+                    State::Broken => {
+                        return Err(format!(
+                            "onion service broken: {:?}",
+                            status.current_problem()
+                        )
+                        .into());
+                    }
+                    other => {
+                        if last_state != Some(other) {
+                            println!(
+                                "[{:.1}s] service state: {:?}",
+                                start.elapsed().as_secs_f64(),
+                                other
+                            );
+                            last_state = Some(other);
+                        }
+                    }
+                }
+            }
+            Ok(None) => return Err("status stream ended unexpectedly".into()),
+            Err(_) => {
+                println!(
+                    "[{:.1}s] still waiting for descriptor publication...",
+                    start.elapsed().as_secs_f64()
+                );
+            }
+        }
+    }
+
+    println!("bot is live, waiting for connections...");
+
+    let bot_start = std::time::Instant::now();
+    let mut connection_count: u64 = 0;
+    let mut stream_requests = handle_rend_requests(rend_requests);
+
+    while let Some(stream_request) = stream_requests.next().await {
+        let data_stream = match stream_request.accept(Connected::new_empty()).await {
+            Ok(s) => s,
+            Err(e) => {
+                eprintln!("failed to accept connection: {}", e);
+                continue;
+            }
+        };
+
+        let mut np = match NoisePeer::accept(data_stream, PATTERN).await {
+            Ok(n) => n,
+            Err(e) => {
+                eprintln!("handshake failed: {}", e);
+                continue;
+            }
+        };
+
+        let auth_pw = if cfg.auth.enabled {
+            auth_password.clone()
+        } else {
+            None
+        };
+
+        if let Err(e) = np.auth_responder(auth_pw.as_deref()).await {
+            eprintln!("authentication failed: {}", e);
+            continue;
+        }
+
+        connection_count += 1;
+        println!(
+            "peer connected (fingerprint: {}) [connection #{}]",
+            np.session_fingerprint, connection_count
+        );
+
+        if let Err(e) = bot::run_bot_session(np, &script, bot_start, connection_count).await {
+            eprintln!("bot session error: {}", e);
+        } else {
+            println!("peer disconnected, waiting for next connection...");
         }
     }
 
