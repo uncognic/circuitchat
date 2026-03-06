@@ -10,7 +10,7 @@ P2P encrypted messaging over Tor in Rust. Creates ephemeral onion services for c
 ## Features
 - **Tor-first** - uses [Arti](https://gitlab.torproject.org/tpo/core/arti) directly. no system Tor installation needed
 - **E2EE** - every session runs a full `Noise_NN_25519_ChaChaPoly_BLAKE2s` handshake over the Tor stream
-- **Scripting/Automation** - create custom bots for circuitchat with a simple event-driven scripting language (see [docs/ccscript.md](docs/ccscript.md))
+- **Scripting/Automation** - create custom bots for circuitchat with a simple event-driven scripting language (see [docs/ccscript.md](docs/CCSCRIPT.md))
 - **Forward secrecy** - ephemeral Noise keys mean past sessions cannot be decrypted even if local data is later compromised
 - **Mutual auth** - optional shared password for session authentication (HMAC-SHA256 over an Argon2-derived key)
 - **File transfer** - send and receive files
