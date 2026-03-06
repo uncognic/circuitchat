@@ -30,8 +30,25 @@ jobs:
           VERSION="${GITHUB_REF#refs/tags/}"
           mv target/release/$BIN$EXT $BIN-$VERSION-$RUNNER_OS$EXT
         shell: bash
+      - name: Generate changelog
+        run: |
+          VERSION="${GITHUB_REF#refs/tags/}"
+          PREV_TAG=$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || echo "")
 
+          echo "## circuitchat $VERSION" > CHANGELOG.md
+          echo "" >> CHANGELOG.md
+
+          if [ -z "$PREV_TAG" ]; then
+            RANGE="HEAD"
+          else
+            RANGE="$PREV_TAG..HEAD"
+          fi
+
+          git log $RANGE --pretty=format:"%s" \
+            | grep -v '^\*' \
+            | sed 's/^/- /' >> CHANGELOG.md
       - name: Upload to GitHub Releases
         uses: softprops/action-gh-release@v2
         with:
           files: circuitchat-*
+          body_path: CHANGELOG.md
