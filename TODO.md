@@ -1,5 +1,4 @@
 - DB ratcheting
-- Show Tor circuit in /status (arti might not be able to?)
 - Voice messages (just record audio as opus and send it)
 - themes in config.ui
 - PROTOCOL.md

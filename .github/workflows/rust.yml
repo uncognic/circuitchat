@@ -31,6 +31,7 @@ jobs:
           mv target/release/$BIN$EXT $BIN-$VERSION-$RUNNER_OS$EXT
         shell: bash
       - name: Generate changelog
+        shell: bash
         run: |
           VERSION="${GITHUB_REF#refs/tags/}"
           PREV_TAG=$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || echo "")
