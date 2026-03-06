@@ -44,7 +44,7 @@ jobs:
             RANGE="$PREV_TAG..HEAD"
           fi
 
-          git log $RANGE --pretty=format:"%s" \
+          git log $RANGE --pretty=format:"%s (%h)" \
             | grep -v '^\*' \
             | sed 's/^/- /' >> CHANGELOG.md
       - name: Upload to GitHub Releases
