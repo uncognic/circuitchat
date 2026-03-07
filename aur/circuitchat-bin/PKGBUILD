@@ -2,7 +2,7 @@
 # https://1707070.xyz/openpgp/openpgp.txt
 
 pkgname=circuitchat-bin
-pkgver=1.8.6.1
+pkgver=1.8.6.2
 pkgrel=1
 pkgdesc="Encrypted peer-to-peer chat over Tor"
 arch=('x86_64')
@@ -15,7 +15,7 @@ source=("$pkgname-$pkgver::https://github.com/uncognic/circuitchat/releases/down
 sha256sums=('SKIP')
 
 prepare() {
-  _sha256=$(curl -sL "https://github.com/uncognic/circuitchat/releases/download/v$pkgver/sha256.txt")
+  _sha256=$(curl -sL "https://github.com/uncognic/circuitchat/releases/download/v$pkgver/circuitchat-v$pkgver-Linux.sha256")
   _actual=$(sha256sum "$srcdir/$pkgname-$pkgver" | awk '{print $1}')
   if [ "$_sha256" != "$_actual" ]; then
     echo "SHA256 mismatch! expected: $_sha256  got: $_actual" >&2

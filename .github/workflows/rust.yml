@@ -50,17 +50,24 @@ jobs:
             | grep -v '^\*' \
             | sed 's/^/- /' >> CHANGELOG.md
 
-      - name: Calculate source tarball sha256
+      - name: Calculate sha256 for source tarball and binary
         shell: bash
         run: |
+          VERSION="${GITHUB_REF#refs/tags/}"
+          EXT=""
+          if [ "$RUNNER_OS" = "Windows" ]; then EXT=".exe"; fi
+          BIN="circuitchat-$VERSION-$RUNNER_OS$EXT"
+
           if command -v sha256sum &>/dev/null; then
             curl -L https://github.com/${{ github.repository }}/archive/refs/tags/${{ github.ref_name }}.tar.gz \
               | sha256sum | awk '{print $1}' > sha256.txt
+            sha256sum "$BIN" | awk '{print $1}' > "$BIN.sha256"
           else
             curl -L https://github.com/${{ github.repository }}/archive/refs/tags/${{ github.ref_name }}.tar.gz \
               | shasum -a 256 | awk '{print $1}' > sha256.txt
+            shasum -a 256 "$BIN" | awk '{print $1}' > "$BIN.sha256"
           fi
-          
+        
       - name: Upload to GitHub Releases
         uses: softprops/action-gh-release@v2
         with:
