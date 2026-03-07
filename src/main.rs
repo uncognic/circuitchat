@@ -140,6 +140,7 @@ async fn chat_loop<T>(
     message_notification_sound: bool,
     mention_notification_sound: bool,
     session_timeout_mins: u64,
+    idle_away_mins: u64,
 ) -> Result<(), Box<dyn Error>>
 where
     T: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send + Sized + 'static,
@@ -210,6 +211,14 @@ where
     let mut outgoing_file: Option<file_transfer::OutgoingFile> = None;
     let mut pending_offer: Option<file_transfer::OutgoingFile> = None;
     let mut last_input_empty = true;
+
+    let mut last_activity = tokio::time::Instant::now();
+    let mut is_away = false;
+    let idle_away_duration = if idle_away_mins > 0 {
+        Some(std::time::Duration::from_secs(idle_away_mins * 60))
+    } else {
+        None
+    };
 
     let mut ping_interval = tokio::time::interval(std::time::Duration::from_secs(15));
     ping_interval.reset();
@@ -301,6 +310,12 @@ where
         // normal mode
         tokio::select! {
             _ = session_tick.tick() => {
+                if let Some(idle_dur) = idle_away_duration {
+                    if !is_away && last_activity.elapsed() >= idle_dur {
+                        is_away = true;
+                        let _ = np.send(&file_transfer::encode_away()).await;
+                    }
+                }
                 terminal.draw(|f| app.draw(f))?;
             }
             _ = ping_interval.tick() => {
@@ -370,6 +385,10 @@ where
                                 if typing_indicators {
                                     app.peer_typing = false;
                                     app.status = app.status.replace(" | peer is typing...", "");
+                                }
+                                if app.peer_away {
+                                    app.peer_away = false;
+                                    app.status = app.status.replace(" | peer is away", "");
                                 }
                             }
                             file_transfer::ParsedMessage::FileOffer { name, size, checksum } => {
@@ -490,6 +509,17 @@ where
                                 }
                                 awaiting_ping_response = false;
                             }
+                            file_transfer::ParsedMessage::Away => {
+                                app.peer_away = true;
+                                if !app.status.contains("| peer is away") {
+                                    let base = app.status.replace(" | peer is away", "");
+                                    app.status = format!("{} | peer is away", base);
+                                }
+                            }
+                            file_transfer::ParsedMessage::Back => {
+                                app.peer_away = false;
+                                app.status = app.status.replace(" | peer is away", "");
+                            }
                         }
                     }
                     Err(_) => {
@@ -502,6 +532,11 @@ where
             event = events.next() => {
                 match event {
                     Some(Ok(Event::Key(key))) => {
+                        last_activity = tokio::time::Instant::now();
+                        if is_away {
+                            is_away = false;
+                            let _ = np.send(&file_transfer::encode_back()).await;
+                        }
                         let submitted = app.handle_key(key);
                         if typing_indicators {
                                 let now_empty = app.input.is_empty();
@@ -828,6 +863,7 @@ async fn run_initiator(
                     message_notification_sound,
                     mention_notification_sound,
                     crate::config::load_or_create()?.privacy.session_timeout_mins,
+                    crate::config::load_or_create()?.privacy.idle_away_mins,
                 )
                 .await;
             }
@@ -987,6 +1023,7 @@ async fn run_responder(
             message_notification_sound,
             mention_notification_sound,
             crate::config::load_or_create()?.privacy.session_timeout_mins,
+            crate::config::load_or_create()?.privacy.idle_away_mins,
         )
         .await
         {

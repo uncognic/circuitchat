@@ -30,6 +30,12 @@ pub struct PrivacyConfig {
     pub randomize_filenames: bool,
     #[serde(alias = "session_timeout_minutes")]
     pub session_timeout_mins: u64,
+    #[serde(default = "default_idle_away_mins")]
+    pub idle_away_mins: u64,
+}
+
+fn default_idle_away_mins() -> u64 {
+    5
 }
 #[derive(Debug, Serialize, Deserialize)]
 pub struct AuthConfig {
@@ -98,6 +104,7 @@ impl Default for Config {
                 read_receipts: false,
                 randomize_filenames: true,
                 session_timeout_mins: 0,
+                idle_away_mins: 5,
             },
             bridge: BridgeConfig {
                 enabled: false,

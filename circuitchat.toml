@@ -26,6 +26,7 @@ typing_status = false
 read_receipts = false
 randomize_filenames = true
 session_timeout_mins = 0 # 0 means no timeout
+idle_away_mins = 5 # 0 to disable, shows away status after N minutes of no input
 
 [bridge]
 enabled = false

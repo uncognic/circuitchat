@@ -33,6 +33,8 @@ pub const MSG_TYPING_STOP: u8 = 0x08;
 pub const MSG_DELIVERED: u8 = 0x09;
 pub const MSG_PING: u8 = 0x0A;
 pub const MSG_PONG: u8 = 0x0B;
+pub const MSG_AWAY: u8 = 0x0C;
+pub const MSG_BACK: u8 = 0x0D;
 
 pub fn encode_typing_start() -> Vec<u8> {
     vec![0x00, MSG_TYPING_START]
@@ -48,6 +50,12 @@ pub fn encode_ping() -> Vec<u8> {
 }
 pub fn encode_pong() -> Vec<u8> {
     vec![0x00, MSG_PONG]
+}
+pub fn encode_away() -> Vec<u8> {
+    vec![0x00, MSG_AWAY]
+}
+pub fn encode_back() -> Vec<u8> {
+    vec![0x00, MSG_BACK]
 }
 //pub fn encode_accept() -> Vec<u8> {
 //    vec![0x00, MSG_FILE_ACCEPT]
@@ -112,6 +120,8 @@ pub enum ParsedMessage {
     Delivered,
     Ping,
     Pong,
+    Away,
+    Back,
     VersionNegotiate {
         major: u8,
         minor: u8,
@@ -168,6 +178,8 @@ pub fn parse_message(data: &[u8]) -> ParsedMessage {
             MSG_DELIVERED => ParsedMessage::Delivered,
             MSG_PING => ParsedMessage::Ping,
             MSG_PONG => ParsedMessage::Pong,
+            MSG_AWAY => ParsedMessage::Away,
+            MSG_BACK => ParsedMessage::Back,
             _ => ParsedMessage::Text(String::from_utf8_lossy(data).to_string()),
         }
     } else {

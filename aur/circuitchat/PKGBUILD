@@ -1,7 +1,7 @@
 # Maintainer: uncognic <uncognic@proton.me>
 # https://1707070.xyz/openpgp/openpgp.txt
 pkgname=circuitchat
-pkgver=1.8.6.2
+pkgver=1.8.7
 pkgrel=1
 pkgdesc="Encrypted peer-to-peer chat over Tor"
 arch=('x86_64')

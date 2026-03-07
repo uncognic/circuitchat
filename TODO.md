@@ -7,5 +7,7 @@
 - AUR package (would be cool)
 - some sort of message expiry, where peers agree to delete messages older than X time
 
+- clear DB command
+
 future goals:
 - separate the protocol into an actual crate
