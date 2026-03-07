@@ -29,7 +29,7 @@ use crossterm::{
 };
 use noise_peer::NoisePeer;
 use std::process;
-use storage::{MessageDirection, Storage};
+use storage::{MessageDirection, Storage, clear_history};
 use zeroize::Zeroize;
 
 const PATTERN: &str = "Noise_NN_25519_ChaChaPoly_BLAKE2s";
@@ -154,7 +154,9 @@ where
     app.session_fingerprint = Some(np.session_fingerprint.clone());
 
     let session_deadline_tokio = if session_timeout_mins > 0 {
-        Some(tokio::time::Instant::now() + std::time::Duration::from_secs(session_timeout_mins * 60))
+        Some(
+            tokio::time::Instant::now() + std::time::Duration::from_secs(session_timeout_mins * 60),
+        )
     } else {
         None
     };
@@ -654,9 +656,20 @@ where
                                 } else {
                                     app.status = "no pending file offer".to_string();
                                 }
+                            } else if text == "/cleardb" {
+                                let owned_storage = storage.take();
+                                if let Err(e) = clear_history(owned_storage) {
+                                    eprintln!("failed to clear database: {}", e);
+                                }
+                                app.messages.clear();
+                                app.add_message(
+                                    MessageDirection::System, 
+                                    "database cleared".to_string(),
+                                    tui::now_timestamp(time_local, hour24, show_tz, show_seconds)
+                                );
                             } else if text == "/clear" {
                                 app.messages.clear();
-                            } else if text == "/panic" {
+                            } else if text == "/panic" || text == "/wipe" {
                                 let owned_storage = storage.take();
                                 if let Err(e) = perform_panic_and_exit(owned_storage) {
                                     eprintln!("panic cleanup failed: {}", e);
@@ -665,7 +678,7 @@ where
                             } else if text == "/help" {
                                 app.add_message(
                                     MessageDirection::System,
-                                    "[help] available commands: /clear, /help, /status, /send, /ping, /panic".to_string(),
+                                    "[help] available commands: /clear, /help, /status, /send, /ping, /panic, /wipe".to_string(),
                                     tui::now_timestamp(time_local, hour24, show_tz, show_seconds),
                                 );
                             } else if text == "/status" {
@@ -862,7 +875,9 @@ async fn run_initiator(
                     randomize_filenames,
                     message_notification_sound,
                     mention_notification_sound,
-                    crate::config::load_or_create()?.privacy.session_timeout_mins,
+                    crate::config::load_or_create()?
+                        .privacy
+                        .session_timeout_mins,
                     crate::config::load_or_create()?.privacy.idle_away_mins,
                 )
                 .await;
@@ -1022,7 +1037,9 @@ async fn run_responder(
             randomize_filenames,
             message_notification_sound,
             mention_notification_sound,
-            crate::config::load_or_create()?.privacy.session_timeout_mins,
+            crate::config::load_or_create()?
+                .privacy
+                .session_timeout_mins,
             crate::config::load_or_create()?.privacy.idle_away_mins,
         )
         .await

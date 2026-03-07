@@ -171,6 +171,11 @@ pub fn zero_and_delete_file(path: &std::path::Path) -> Result<(), Box<dyn Error>
     std::fs::remove_file(path)?;
     Ok(())
 }
+pub fn clear_history(storage: Option<Storage>) -> Result<(), Box<dyn Error>> {
+    let storage = storage.ok_or("no storage available")?;
+    storage.conn.execute("DELETE FROM messages", [])?;
+    Ok(())
+}
 pub fn db_path() -> Result<PathBuf, Box<dyn Error>> {
     let exe_dir = std::env::current_exe()?
         .parent()
