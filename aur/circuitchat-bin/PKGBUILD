@@ -2,7 +2,7 @@
 # https://1707070.xyz/openpgp/openpgp.txt
 
 pkgname=circuitchat-bin
-pkgver=1.8.6
+pkgver=1.8.6.1
 pkgrel=1
 pkgdesc="Encrypted peer-to-peer chat over Tor"
 arch=('x86_64')
