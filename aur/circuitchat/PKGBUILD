@@ -24,6 +24,8 @@ prepare() {
 
 build() {
   cd "$pkgname-$pkgver"
+  export PKG_CONFIG_PATH="/usr/lib/pkgconfig"
+  export ZSTD_SYS_USE_PKG_CONFIG=1
   cargo build --release
 }
 
