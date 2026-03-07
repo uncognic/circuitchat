@@ -18,10 +18,11 @@ pkgver() {
 
 prepare() {
   _sha256=$(curl -sL "https://github.com/uncognic/circuitchat/releases/download/v$pkgver/sha256.txt")
-  echo "$_sha256  $pkgname-$pkgver.tar.gz" | sha256sum --check --quiet || {
-    echo "SHA256 mismatch!" >&2
+  _actual=$(sha256sum "$srcdir/$pkgname-$pkgver" | awk '{print $1}')
+  if [ "$_sha256" != "$_actual" ]; then
+    echo "SHA256 mismatch! expected: $_sha256  got: $_actual" >&2
     return 1
-  }
+  fi
 }
 
 build() {
