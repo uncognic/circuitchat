@@ -7,7 +7,6 @@ pkgdesc="Encrypted peer-to-peer chat over Tor"
 arch=('x86_64')
 url="https://github.com/uncognic/circuitchat"
 license=('GPL3')
-depends=()
 depends=('sqlite' 'zstd' 'openssl')
 makedepends=('rust' 'cargo' 'sqlite' 'zstd' 'openssl')
 provides=('circuitchat')
