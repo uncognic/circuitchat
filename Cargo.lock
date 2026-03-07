@@ -606,7 +606,7 @@ dependencies = [
 
 [[package]]
 name = "circuitchat"
-version = "1.8.8"
+version = "1.8.9"
 dependencies = [
  "argon2",
  "arti-client",
@@ -625,6 +625,7 @@ dependencies = [
  "sha2",
  "sha256",
  "snow",
+ "tempfile",
  "tokio",
  "toml 1.0.3+spec-1.1.0",
  "tor-cell",

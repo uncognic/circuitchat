@@ -47,10 +47,12 @@ struct StatusContext {
 fn build_tor_config(
     persist: bool,
     bridges: &config::BridgeConfig,
-) -> Result<TorClientConfig, Box<dyn Error>> {
+) -> Result<(TorClientConfig, Option<tempfile::TempDir>), Box<dyn Error>> {
     let mut builder = TorClientConfig::builder();
+    let mut _tmp_dir = None;
 
     if persist {
+        println!("persistence: enabled");
         let exe_dir = std::env::current_exe()?
             .parent()
             .ok_or("could not determine exe directory")?
@@ -61,6 +63,17 @@ fn build_tor_config(
         builder
             .storage()
             .state_dir(CfgPath::new_literal(exe_dir.join("state")));
+    } else {
+        // use tmpfile as directory, since Arti will use one if you don't specify one
+        println!("persistence: disabled (temporary onion address, no message history)");
+        let tmp = tempfile::tempdir()?;
+        builder
+            .storage()
+            .cache_dir(CfgPath::new_literal(tmp.path().join("cache")));
+        builder
+            .storage()
+            .state_dir(CfgPath::new_literal(tmp.path().join("state")));
+        _tmp_dir = Some(tmp);
     }
 
     if bridges.enabled && !bridges.lines.is_empty() {
@@ -70,7 +83,7 @@ fn build_tor_config(
         }
     }
 
-    Ok(builder.build()?)
+    Ok((builder.build()?, _tmp_dir))
 }
 
 fn perform_panic_and_exit(storage: Option<Storage>) -> Result<(), Box<dyn Error>> {
@@ -1120,7 +1133,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
         p.zeroize();
     }
 
-    let tor_config = build_tor_config(cfg.identity.persist, &cfg.bridge)?;
+    let (tor_config, _ephemeral_dir) = build_tor_config(cfg.identity.persist, &cfg.bridge)?;
 
     println!("bootstrapping tor...");
     if cfg.bridge.enabled && !cfg.bridge.lines.is_empty() {
@@ -1223,7 +1236,7 @@ async fn run_bot_mode(script_path: &str) -> Result<(), Box<dyn Error>> {
         p.zeroize();
     }
 
-    let tor_config = build_tor_config(cfg.identity.persist, &cfg.bridge)?;
+    let (tor_config, _ephemeral_dir) = build_tor_config(cfg.identity.persist, &cfg.bridge)?;
 
     println!("bootstrapping tor...");
     let start = std::time::Instant::now();

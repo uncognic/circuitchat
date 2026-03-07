@@ -1,6 +1,6 @@
 [package]
 name = "circuitchat"
-version = "1.8.8"
+version = "1.8.9"
 edition = "2024"
 
 [dependencies]
@@ -28,3 +28,4 @@ sha2 = "0.10.9"
 hex = "0.4.3"
 xxhash-rust = "0.8.15"
 zeroize = "1.8.2"
+tempfile = "3.26.0"
