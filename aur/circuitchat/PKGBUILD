@@ -1,6 +1,5 @@
 # Maintainer: uncognic <uncognic@proton.me>
 # https://1707070.xyz/openpgp/openpgp.txt
-
 pkgname=circuitchat
 pkgver=1.8.6.2
 pkgrel=1
@@ -10,15 +9,13 @@ url="https://github.com/uncognic/circuitchat"
 license=('GPL3')
 depends=()
 makedepends=('rust' 'cargo')
+provides=('circuitchat')
 source=("$pkgname-$pkgver.tar.gz::https://github.com/uncognic/circuitchat/archive/refs/tags/v$pkgver.tar.gz")
-
-pkgver() {
-  echo "$pkgver"
-}
+sha256sums=('SKIP')
 
 prepare() {
   _sha256=$(curl -sL "https://github.com/uncognic/circuitchat/releases/download/v$pkgver/sha256.txt")
-  _actual=$(sha256sum "$srcdir/$pkgname-$pkgver" | awk '{print $1}')
+  _actual=$(sha256sum "$srcdir/$pkgname-$pkgver.tar.gz" | awk '{print $1}')
   if [ "$_sha256" != "$_actual" ]; then
     echo "SHA256 mismatch! expected: $_sha256  got: $_actual" >&2
     return 1
