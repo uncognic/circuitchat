@@ -30,6 +30,7 @@ jobs:
           VERSION="${GITHUB_REF#refs/tags/}"
           mv target/release/$BIN$EXT $BIN-$VERSION-$RUNNER_OS$EXT
         shell: bash
+
       - name: Generate changelog
         shell: bash
         run: |
@@ -48,8 +49,22 @@ jobs:
           git log $RANGE --pretty=format:"%s (%h)" \
             | grep -v '^\*' \
             | sed 's/^/- /' >> CHANGELOG.md
+
+      - name: Calculate source tarball sha256
+        shell: bash
+        run: |
+          if command -v sha256sum &>/dev/null; then
+            curl -L https://github.com/${{ github.repository }}/archive/refs/tags/${{ github.ref_name }}.tar.gz \
+              | sha256sum | awk '{print $1}' > sha256.txt
+          else
+            curl -L https://github.com/${{ github.repository }}/archive/refs/tags/${{ github.ref_name }}.tar.gz \
+              | shasum -a 256 | awk '{print $1}' > sha256.txt
+          fi
+          
       - name: Upload to GitHub Releases
         uses: softprops/action-gh-release@v2
         with:
-          files: circuitchat-*
+          files: |
+            circuitchat-*
+            sha256.txt
           body_path: CHANGELOG.md

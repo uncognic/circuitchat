@@ -1,3 +1,4 @@
+- Comment the code
 - DB ratcheting
 - Voice messages (just record audio as opus and send it)
 - themes in config.ui

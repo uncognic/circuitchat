@@ -1,0 +1,27 @@
+# Maintainer: uncognic <uncognic@proton.me>
+# https://1707070.xyz/openpgp/openpgp.txt
+
+pkgname=circuitchat-bin
+pkgver=1.8.6
+pkgrel=1
+pkgdesc="Encrypted peer-to-peer chat over Tor"
+arch=('x86_64')
+url="https://github.com/uncognic/circuitchat"
+license=('GPL3')
+depends=()
+provides=('circuitchat')
+conflicts=('circuitchat')
+source=("$pkgname-$pkgver::https://github.com/uncognic/circuitchat/releases/download/v$pkgver/circuitchat-v$pkgver-Linux")
+sha256sums=('SKIP')
+
+prepare() {
+  _sha256=$(curl -sL "https://github.com/uncognic/circuitchat/releases/download/v$pkgver/sha256.txt")
+  echo "$_sha256  $pkgname-$pkgver" | sha256sum --check --quiet || {
+    echo "SHA256 mismatch!" >&2
+    return 1
+  }
+}
+
+package() {
+  install -Dm755 "$srcdir/$pkgname-$pkgver" "$pkgdir/usr/bin/circuitchat"
+}
