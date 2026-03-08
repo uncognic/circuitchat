@@ -676,7 +676,7 @@ where
                                 }
                                 app.messages.clear();
                                 app.add_message(
-                                    MessageDirection::System, 
+                                    MessageDirection::System,
                                     "database cleared".to_string(),
                                     tui::now_timestamp(time_local, hour24, show_tz, show_seconds)
                                 );
@@ -691,7 +691,7 @@ where
                             } else if text == "/help" {
                                 app.add_message(
                                     MessageDirection::System,
-                                    "[help] available commands: /clear, /help, /status, /send, /ping, /panic, /wipe".to_string(),
+                                    "[help] available commands: /clear, /help, /status, /send, /ping, /panic, /wipe, /find".to_string(),
                                     tui::now_timestamp(time_local, hour24, show_tz, show_seconds),
                                 );
                             } else if text == "/status" {
@@ -773,6 +773,39 @@ where
                                     tui::now_timestamp(time_local, hour24, show_tz, show_seconds),
                                 );
                                 let _ = np.send(&file_transfer::encode_ping()).await;
+                            } else if text.starts_with("/find") {
+                                let ts = tui::now_timestamp(time_local, hour24, show_tz, show_seconds);
+                                let term = text[6..].trim();
+                                if term.is_empty() {
+                                    app.add_message(MessageDirection::System, "[find] usage: /find <term>".to_string(), ts);
+                                } else if let Some(s) = storage {
+                                    match s.search_history(term) {
+                                        Ok(results) if results.is_empty() => {
+                                            app.add_message(MessageDirection::System, format!("[find] no results for '{}'", term), ts);
+                                        }
+                                        Ok(results) => {
+                                            app.add_message(MessageDirection::System, format!("[find] {} result(s) for '{}':", results.len(), term), ts.clone());
+                                            for msg in results {
+                                                let text = String::from_utf8_lossy(&msg.content).to_string();
+                                                let prefix = match msg.direction {
+                                                    MessageDirection::Sent => "you",
+                                                    MessageDirection::Received => "peer",
+                                                    MessageDirection::System => "system",
+                                                };
+                                                app.add_message(
+                                                    MessageDirection::System,
+                                                    format!("[{}] {}", prefix, text),
+                                                    tui::format_timestamp(msg.timestamp, time_local, hour24, show_tz, show_seconds),
+                                                );
+                                            }
+                                        }
+                                        Err(e) => {
+                                            app.add_message(MessageDirection::System, format!("[find] error: {}", e), ts);
+                                        }
+                                    }
+                                } else {
+                                    app.add_message(MessageDirection::System, "[find] no storage available".to_string(), ts);
+                                }
                             } else {
                                 let bytes = text.as_bytes().to_vec();
                                 if let Err(e) = np.send(&bytes).await {

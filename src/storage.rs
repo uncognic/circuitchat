@@ -153,6 +153,29 @@ impl Storage {
             }
         }
     }
+    pub fn search_history(&self, term: &str) -> Result<Vec<Message>, Box<dyn Error>> {
+    let mut statement = self.conn.prepare(
+        "SELECT direction, content, timestamp FROM messages ORDER BY timestamp ASC"
+    )?;
+
+    let rows: Vec<(String, Vec<u8>, i64)> = statement
+        .query_map([], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))?
+        .collect::<Result<Vec<_>, _>>()?;
+
+    let mut matches = Vec::new();
+    for (direction, encrypted, timestamp) in rows {
+        let content = decrypt(&self.key, &encrypted)?;
+        let text = String::from_utf8_lossy(&content).to_string();
+        if text.to_lowercase().contains(&term.to_lowercase()) {
+            matches.push(Message {
+                direction: MessageDirection::from_str(&direction),
+                content,
+                timestamp,
+            });
+        }
+    }
+    Ok(matches)
+}
 }
 
 pub fn zero_and_delete_file(path: &std::path::Path) -> Result<(), Box<dyn Error>> {
@@ -176,6 +199,7 @@ pub fn clear_history(storage: Option<Storage>) -> Result<(), Box<dyn Error>> {
     storage.conn.execute("DELETE FROM messages", [])?;
     Ok(())
 }
+
 pub fn db_path() -> Result<PathBuf, Box<dyn Error>> {
     let exe_dir = std::env::current_exe()?
         .parent()

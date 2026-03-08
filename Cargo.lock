@@ -606,7 +606,7 @@ dependencies = [
 
 [[package]]
 name = "circuitchat"
-version = "1.8.9"
+version = "1.8.10"
 dependencies = [
  "argon2",
  "arti-client",
