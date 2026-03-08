@@ -5,6 +5,8 @@ The config file is created automatically next to the binary on first run (`circu
 ## Default config
 
 ```toml
+# This is the default TOML configuration for circuitchat
+# It is configured for maximum privacy
 [identity]
 persist = false
 
@@ -23,13 +25,15 @@ show_tz = false
 show_seconds = false
 
 [auth]
-enabled = false
-password = ""
+enabled = true
+password = "" # It will prompt you for a password on startup if auth is enabled and this is empty
 
 [privacy]
 typing_status = false
 read_receipts = false
 randomize_filenames = true
+session_timeout_mins = 0 # 0 means no timeout
+idle_away_mins = 5 # 0 to disable, shows away status after N minutes of no input
 
 [bridge]
 enabled = false
@@ -85,7 +89,8 @@ Optional shared-password authentication. When enabled, the listener requires the
 | `typing_status` | bool | `false` | Send typing start/stop notifications to your peer when you begin or clear the input field. |
 | `read_receipts` | bool | `false` | Send a "delivered" acknowledgement when a message is received. The sender's TUI marks the message as delivered. |
 | `randomize_filenames` | bool | `true` | When sending a file, randomize the filename to avoid revealing information about the file's original name. |
-
+| `session_timeout_mins` | integer | `0` | Automatically end the session with panic after N minutes. 0 means no timeout. |
+| `idle_away_mins` | integer | `5` | Show away status after N minutes of no input. 0 to disable. |
 Both features are opt-in and only active when both sides have them enabled in their own configs. A peer that does not have `typing_status` enabled will simply ignore the control messages.
 
 

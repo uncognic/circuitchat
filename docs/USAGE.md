@@ -55,7 +55,9 @@ Once connected, both sides perform a Noise handshake and (optionally) authentica
 |---------|-------------|
 | `listen` | Bootstrap Tor, create an onion service, and wait for a peer to connect |
 | `initiate <onion_address>` | Bootstrap Tor and connect to the given `.onion` address |
+| `bot <script>` | Run a bot script (see [docs/ccscript.md](docs/CCSCRIPT.md)) |
 | `--reset` | Delete saved state (`circuitchat.db`, `cache/`, `state/`) and exit |
+| `--version` | Print version and exit |
 
 ## In-chat commands
 | Command | Description |
@@ -64,6 +66,12 @@ Once connected, both sides perform a Noise handshake and (optionally) authentica
 | `/accept` | Accept a pending incoming file offer |
 | `/reject` | Reject a pending incoming file offer |
 | `/cancel` | Cancel the active incoming file transfer and delete the partial file |
+| `/help` | Show the list of commands |
+| `/status` | Show connection and session status |
+| `/ping` | Send a ping message to the peer |
+| `/panic` / `/wipe` | End the session immediately and delete all state (including config) |
+| `/find <query>` | Search message history for `<query>` and show matching messages |
+| `/clear` | Clear the screen (does not delete history) |
 
 See [File transfer](file-transfer.md)
 
