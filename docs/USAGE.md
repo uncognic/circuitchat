@@ -9,6 +9,8 @@ git clone https://github.com/your-username/circuitchat
 cd circuitchat
 cargo build --release
 ```
+Note: you might run into issues with OpenSSL and RuSQLite on some platforms. Install the appropriate development packages for your OS (e.g. `libssl-dev` and `libsqlite3-dev` on Debian/Ubuntu).
+
 The compiled binary is at `target/release/circuitchat` (or `circuitchat.exe` on Windows). 
 
 ### Precompiled binaries
