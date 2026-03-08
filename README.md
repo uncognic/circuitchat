@@ -5,7 +5,7 @@ P2P encrypted messaging over Tor in Rust. Creates ephemeral onion services for c
 - Main site: https://circuitchat.1707070.xyz
 - Onion: http://si52lslgxgqnzom5bsbyr7axyj6r3ykelskahuuf36dxrzrbsppio5qd.onion/
 
-![GIF of circuitchat](metadata/gif.gif)
+<video src="https://github.com/user-attachments/assets/42a4bd25-fde1-499a-b008-045f01308843" autoplay loop muted playback-inline></video>
 
 ## Features
 - **Tor-first** - uses [Arti](https://gitlab.torproject.org/tpo/core/arti) directly. no system Tor installation needed
