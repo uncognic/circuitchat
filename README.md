@@ -33,7 +33,7 @@ circuitchat bot myscript.ccscript
 On first run a `circuitchat.toml` config file is created next to the binary. All generated files (`circuitchat.toml`, `circuitchat.db`, `cache/`, `state/`, `downloads/`) live in the same directory as the binary.
 
 ## Documentation
-- [Usage](docs/usage.md)\
+- [Usage](docs/USAGE.md)\
 - [Configuration](docs/CONFIG.md) \
 - [Security](docs/SECURITY.md) \
 - [File transfer](docs/FILES.md)
