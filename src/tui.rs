@@ -12,8 +12,35 @@ use std::io::{self, Write};
 use std::time::Instant;
 pub struct ChatMessage {
     pub direction: MessageDirection,
-    pub content: String,
+    pub content: Vec<(String, Option<Style>)>,
     pub timestamp: String,
+}
+
+pub fn plain(text: &str) -> Vec<(String, Option<Style>)> {
+    vec![(text.to_string(), None)]
+}
+
+pub fn highlighted(text: &str, term: &str) -> Vec<(String, Option<Style>)> {
+    let lower_text = text.to_lowercase();
+    let lower_term = term.to_lowercase();
+    let mut spans = Vec::new();
+    let mut last = 0;
+
+    while let Some(pos) = lower_text[last..].find(&lower_term) {
+        let abs = last + pos;
+        if abs > last {
+            spans.push((text[last..abs].to_string(), None));
+        }
+        spans.push((
+            text[abs..abs + term.len()].to_string(),
+            Some(Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
+        ));
+        last = abs + term.len();
+    }
+    if last < text.len() {
+        spans.push((text[last..].to_string(), None));
+    }
+    spans
 }
 
 pub struct TransferProgress {
@@ -82,10 +109,11 @@ impl App {
         }
     }
 
-    pub fn add_message(&mut self, direction: MessageDirection, content: String, timestamp: String) {
+    pub fn add_message(&mut self, direction: MessageDirection, content: Vec<(String, Option<Style>)>, timestamp: String) {
+        let full_text: String = content.iter().map(|(s, _)| s.as_str()).collect();
         let should_bell = matches!(direction, MessageDirection::Received)
             && (self.message_notification_sound
-                || (content.contains("@peer") && self.mention_notification_sound));
+                || (full_text.contains("@peer") && self.mention_notification_sound));
 
         self.messages.push(ChatMessage {
             direction,
@@ -99,6 +127,10 @@ impl App {
         }
 
         self.scroll_to_bottom();
+    }
+
+    pub fn add_plain_message(&mut self, direction: MessageDirection, content: String, timestamp: String) {
+        self.add_message(direction, plain(&content), timestamp);
     }
 
     pub fn set_send_progress(&mut self, name: String, size: u64) {
@@ -342,7 +374,7 @@ impl App {
                     MessageDirection::Received => ("peer", Color::Cyan),
                     MessageDirection::System => ("system", Color::Yellow),
                 };
-                Line::from(vec![
+                let mut spans = vec![
                     Span::styled(
                         format!("[{}] ", msg.timestamp),
                         Style::default().fg(Color::DarkGray),
@@ -351,8 +383,14 @@ impl App {
                         format!("{}: ", label),
                         Style::default().fg(color).add_modifier(Modifier::BOLD),
                     ),
-                    Span::styled(msg.content.clone(), Style::default().fg(Color::White)),
-                ])
+                ];
+                for (segment, style) in &msg.content {
+                    match style {
+                        Some(s) => spans.push(Span::styled(segment.clone(), *s)),
+                        None => spans.push(Span::styled(segment.clone(), Style::default().fg(Color::White))),
+                    }
+                }
+                Line::from(spans)
             })
             .collect();
 
@@ -586,9 +624,12 @@ impl App {
     }
     pub fn mark_last_sent_delivered(&mut self) {
         for msg in self.messages.iter_mut().rev() {
-            if msg.direction == MessageDirection::Sent && !msg.content.ends_with(" ✓") {
-                msg.content.push_str(" ✓");
-                break;
+            if msg.direction == MessageDirection::Sent {
+                let full: String = msg.content.iter().map(|(s, _)| s.as_str()).collect();
+                if !full.ends_with(" ✓") {
+                    msg.content.push((" ✓".to_string(), None));
+                    break;
+                }
             }
         }
     }

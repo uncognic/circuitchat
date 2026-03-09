@@ -183,7 +183,7 @@ where
     if let Some(ref s) = *storage {
         if let Ok(messages) = s.load_history() {
             for msg in messages {
-                app.add_message(
+                app.add_plain_message(
                     msg.direction,
                     String::from_utf8_lossy(&msg.content).to_string(),
                     tui::format_timestamp(msg.timestamp, time_local, hour24, show_tz, show_seconds),
@@ -213,7 +213,7 @@ where
                 if major != our_major {
                     warn = format!("INCOMPATIBLE MAJOR VERSION - {}", warn);
                 }
-                app.add_message(
+                app.add_plain_message(
                     MessageDirection::System,
                     warn,
                     tui::now_timestamp(time_local, hour24, show_tz, show_seconds),
@@ -243,7 +243,7 @@ where
     let ping_timeout = std::time::Duration::from_secs(45);
     let mut peer_responding = true;
     let mut awaiting_ping_response = false;
-    app.add_message(
+    app.add_plain_message(
             MessageDirection::System,
             "compare the fingerprint at the bottom with your peer's. if it is the same, the connection is secure.".to_string(),
             tui::now_timestamp(time_local, hour24, show_tz, show_seconds),
@@ -271,7 +271,7 @@ where
             if cancelled {
                 let _ = np.send(&file_transfer::encode_cancel()).await;
                 let out = outgoing_file.take().unwrap();
-                app.add_message(
+                app.add_plain_message(
                     MessageDirection::Sent,
                     format!("[file] cancelled sending {}", out.name),
                     tui::now_timestamp(time_local, hour24, show_tz, show_seconds),
@@ -284,7 +284,7 @@ where
             match result {
                 Ok(Some(data)) => {
                     if let Err(e) = np.send(&file_transfer::encode_chunk(&data)).await {
-                        app.add_message(
+                        app.add_plain_message(
                             MessageDirection::Sent,
                             format!("[file] send error: {}", e),
                             tui::now_timestamp(time_local, hour24, show_tz, show_seconds),
@@ -299,7 +299,7 @@ where
                 Ok(None) => {
                     let _ = np.send(&file_transfer::encode_done()).await;
                     let out = outgoing_file.take().unwrap();
-                    app.add_message(
+                    app.add_plain_message(
                         MessageDirection::Sent,
                         format!(
                             "[file] sent {} ({})",
@@ -311,7 +311,7 @@ where
                     app.clear_send_progress();
                 }
                 Err(e) => {
-                    app.add_message(
+                    app.add_plain_message(
                         MessageDirection::Sent,
                         format!("[file] read error: {}", e),
                         tui::now_timestamp(time_local, hour24, show_tz, show_seconds),
@@ -375,7 +375,7 @@ where
                                     if major != our_major {
                                         warn = format!("INCOMPATIBLE MAJOR VERSION - {}", warn);
                                     }
-                                    app.add_message(
+                                    app.add_plain_message(
                                         MessageDirection::System,
                                         warn,
                                         tui::now_timestamp(time_local, hour24, show_tz, show_seconds),
@@ -384,9 +384,14 @@ where
                             }
 
                             file_transfer::ParsedMessage::Text(content) => {
+                                let spans = if content.contains("@peer") {
+                                    tui::highlighted(&content, "@peer")
+                                } else {
+                                    tui::plain(&content)
+                                };
                                 app.add_message(
                                     MessageDirection::Received,
-                                    content,
+                                    spans,
                                     tui::now_timestamp(time_local, hour24, show_tz, show_seconds),
                                 );
                                 if let Some(ref s) = *storage {
@@ -408,7 +413,7 @@ where
                             }
                             file_transfer::ParsedMessage::FileOffer { name, size, checksum } => {
                                 let size_str = file_transfer::format_size(size);
-                                app.add_message(
+                                app.add_plain_message(
                                     MessageDirection::Received,
                                     format!(
                                         "[file] peer wants to send {} ({}) - type /accept or /reject",
@@ -435,7 +440,7 @@ where
                                     let size = inc.size;
                                     match inc.finish() {
                                         Ok(path) => {
-                                            app.add_message(
+                                            app.add_plain_message(
                                                 MessageDirection::Received,
                                                 format!(
                                                     "[file] saved {} ({}) -> {}",
@@ -458,7 +463,7 @@ where
                             file_transfer::ParsedMessage::FileCancel => {
                                 if let Some(inc) = incoming_file.take() {
                                     inc.cancel();
-                                        app.add_message(
+                                        app.add_plain_message(
                                         MessageDirection::Received,
                                         "[file] peer cancelled the transfer".to_string(),
                                         tui::now_timestamp(time_local, hour24, show_tz, show_seconds),
@@ -472,7 +477,7 @@ where
                                     if let Err(e) = out.seek_to(offset) {
                                         app.status = format!("file seek error: {}", e);
                                     } else {
-                                        app.add_message(
+                                        app.add_plain_message(
                                             MessageDirection::Received,
                                             format!("[file] peer accepted {}", out.name),
                                             tui::now_timestamp(time_local, hour24, show_tz, show_seconds),
@@ -485,7 +490,7 @@ where
                             }
                             file_transfer::ParsedMessage::FileReject => {
                                 if let Some(out) = pending_offer.take() {
-                                    app.add_message(
+                                    app.add_plain_message(
                                         MessageDirection::Received,
                                         format!("[file] peer rejected {}", out.name),
                                         tui::now_timestamp(time_local, hour24, show_tz, show_seconds),
@@ -516,7 +521,7 @@ where
                             }
                             file_transfer::ParsedMessage::Pong => {
                                 if awaiting_ping_response {
-                                    app.add_message(
+                                    app.add_plain_message(
                                         MessageDirection::Received,
                                         "Pong!".to_string(),
                                         tui::now_timestamp(time_local, hour24, show_tz, show_seconds),
@@ -575,7 +580,7 @@ where
                                         ).await {
                                             app.status = format!("send failed: {}", e);
                                         } else {
-                                            app.add_message(
+                                            app.add_plain_message(
                                                 MessageDirection::Sent,
                                                 format!(
                                                     "[file] offered {} ({}) - waiting for peer to accept",
@@ -594,7 +599,7 @@ where
                             } else if text == "/cancel" {
                                 if let Some(inc) = incoming_file.take() {
                                     inc.cancel();
-                                        app.add_message(
+                                        app.add_plain_message(
                                             MessageDirection::Sent,
                                             "[file] cancelled receiving".to_string(),
                                             tui::now_timestamp(time_local, hour24, show_tz, show_seconds),
@@ -620,7 +625,7 @@ where
                                         if let Ok(path) = file_transfer::download_path(&name) {
                                                 if let Ok(sum) = file_transfer::file_xxh3(&path) {
                                                 if &sum == checksum.unwrap() {
-                                                    app.add_message(
+                                                    app.add_plain_message(
                                                         MessageDirection::Received,
                                                         format!("[file] already downloaded {}", name),
                                                         tui::now_timestamp(time_local, hour24, show_tz, show_seconds),
@@ -642,7 +647,7 @@ where
                                                 app.set_recv_progress(name.clone(), size);
                                                 incoming_file = Some(inc);
                                                 app.pending_incoming_offer = None;
-                                                app.add_message(
+                                                app.add_plain_message(
                                                     MessageDirection::Sent,
                                                     format!("[file] accepted {}", name),
                                                     tui::now_timestamp(time_local, hour24, show_tz, show_seconds),
@@ -661,7 +666,7 @@ where
                                     let name = offer.0.clone();
                                     let _ = np.send(&file_transfer::encode_reject()).await;
                                     app.pending_incoming_offer = None;
-                                    app.add_message(
+                                    app.add_plain_message(
                                         MessageDirection::Sent,
                                         format!("[file] rejected {}", name),
                                         tui::now_timestamp(time_local, hour24, show_tz, show_seconds),
@@ -675,7 +680,7 @@ where
                                     eprintln!("failed to clear database: {}", e);
                                 }
                                 app.messages.clear();
-                                app.add_message(
+                                app.add_plain_message(
                                     MessageDirection::System,
                                     "database cleared".to_string(),
                                     tui::now_timestamp(time_local, hour24, show_tz, show_seconds)
@@ -689,7 +694,7 @@ where
                                 }
                                 process::exit(1);
                             } else if text == "/help" {
-                                app.add_message(
+                                app.add_plain_message(
                                     MessageDirection::System,
                                     "[help] available commands: /clear, /help, /status, /send, /ping, /panic, /wipe, /find".to_string(),
                                     tui::now_timestamp(time_local, hour24, show_tz, show_seconds),
@@ -711,7 +716,7 @@ where
                                     "[status] bridges: not configured".to_string()
                                 };
                                 if let Some(ref addr) = status_ctx.onion_addr {
-                                    app.add_message(
+                                    app.add_plain_message(
                                         MessageDirection::System,
                                         format!("[status] your address: {}", addr),
                                         ts.clone(),
@@ -722,13 +727,13 @@ where
                                 } else {
                                     "unknown".to_string()
                                 };
-                                app.add_message(
+                                app.add_plain_message(
                                     MessageDirection::System,
                                     format!("[status] peer protocol version: {}", peer_version_str),
                                     tui::now_timestamp(time_local, hour24, show_tz, show_seconds),
                                 );
                                 let (our_major, our_minor, our_patch) = file_transfer::protocol_version();
-                                app.add_message(
+                                app.add_plain_message(
                                     MessageDirection::System,
                                     format!("[status] protocol version: {}.{}.{}", our_major, our_minor, our_patch),
                                     tui::now_timestamp(time_local, hour24, show_tz, show_seconds),
@@ -745,29 +750,29 @@ where
                                     "[status] history: disabled".to_string()
                                 };
 
-                                app.add_message(
+                                app.add_plain_message(
                                     MessageDirection::System,
                                     bs_line,
                                     ts.clone(),
                                 );
-                                app.add_message(
+                                app.add_plain_message(
                                     MessageDirection::System,
                                     bridges_line,
                                     ts.clone(),
                                 );
-                                app.add_message(
+                                app.add_plain_message(
                                     MessageDirection::System,
                                     identity_line,
                                     ts.clone(),
                                 );
-                                app.add_message(
+                                app.add_plain_message(
                                     MessageDirection::System,
                                     history_line,
                                     ts,
                                 );
                             } else if text == "/ping" {
                                 awaiting_ping_response = true;
-                                app.add_message(
+                                app.add_plain_message(
                                     MessageDirection::Sent,
                                     "Ping?".to_string(),
                                     tui::now_timestamp(time_local, hour24, show_tz, show_seconds),
@@ -777,14 +782,14 @@ where
                                 let ts = tui::now_timestamp(time_local, hour24, show_tz, show_seconds);
                                 let term = text[6..].trim();
                                 if term.is_empty() {
-                                    app.add_message(MessageDirection::System, "[find] usage: /find <term>".to_string(), ts);
+                                    app.add_plain_message(MessageDirection::System, "[find] usage: /find <term>".to_string(), ts);
                                 } else if let Some(s) = storage {
                                     match s.search_history(term) {
                                         Ok(results) if results.is_empty() => {
-                                            app.add_message(MessageDirection::System, format!("[find] no results for '{}'", term), ts);
+                                            app.add_plain_message(MessageDirection::System, format!("[find] no results for '{}'", term), ts);
                                         }
                                         Ok(results) => {
-                                            app.add_message(MessageDirection::System, format!("[find] {} result(s) for '{}':", results.len(), term), ts.clone());
+                                            app.add_plain_message(MessageDirection::System, format!("[find] {} result(s) for '{}':", results.len(), term), ts.clone());
                                             for msg in results {
                                                 let text = String::from_utf8_lossy(&msg.content).to_string();
                                                 let prefix = match msg.direction {
@@ -792,19 +797,20 @@ where
                                                     MessageDirection::Received => "peer",
                                                     MessageDirection::System => "system",
                                                 };
+                                                let spans = tui::highlighted(&format!("[{}] {}", prefix, text), term);
                                                 app.add_message(
                                                     MessageDirection::System,
-                                                    format!("[{}] {}", prefix, text),
+                                                    spans,
                                                     tui::format_timestamp(msg.timestamp, time_local, hour24, show_tz, show_seconds),
                                                 );
                                             }
                                         }
                                         Err(e) => {
-                                            app.add_message(MessageDirection::System, format!("[find] error: {}", e), ts);
+                                            app.add_plain_message(MessageDirection::System, format!("[find] error: {}", e), ts);
                                         }
                                     }
                                 } else {
-                                    app.add_message(MessageDirection::System, "[find] no storage available".to_string(), ts);
+                                    app.add_plain_message(MessageDirection::System, "[find] no storage available".to_string(), ts);
                                 }
                             } else {
                                 let bytes = text.as_bytes().to_vec();
@@ -813,7 +819,7 @@ where
                                     terminal.draw(|f| app.draw(f))?;
                                     break;
                                 }
-                                app.add_message(
+                                app.add_plain_message(
                                     MessageDirection::Sent,
                                     text,
                                     tui::now_timestamp(time_local, hour24, show_tz, show_seconds),

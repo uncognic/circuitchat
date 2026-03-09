@@ -99,7 +99,7 @@ If Tor is blocked on your network, configure bridges:
 [bridge]
 enabled = true
 lines = [
-    "82.69.107.17:9001 42B0A9BA84007D81B329F2ECB86D2F44D3CA995C"
+    "0.0.0.0:123 FINGERPRINT_HERE"
 ]
 ```
 Obtain bridge lines from [bridges.torproject.org](https://bridges.torproject.org/)
