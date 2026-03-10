@@ -1,6 +1,6 @@
 # File transfer
 ## Overview
-circuitchat supports sending and receiving files within a chat session. All file data is sent through the same Noise-encrypted Tor stream as regular messages - there is no separate connection.
+circuitchat supports sending and receiving files within a chat session. All file data is sent through the same Noise-encrypted Tor stream as regular messages - there is no separate connection. Files are checksummed using XXH3 to verify integrity after transfer.
 
 ## Sending a file
 `/send /absolute/or/relative/path/to/file.zip`. This sends a file offer to your peer. The offer includes the filename and file size. The actual transfer does not start until the peer accepts.
