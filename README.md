@@ -16,7 +16,7 @@ P2P encrypted messaging over Tor in Rust. Creates ephemeral onion services for c
 - **File transfer** - send and receive files
 - **Encrypted history** - optionally persist messages in a local SQLite database encrypted per-message with XChaCha20-Poly1305
 - **Bridge support** - configure Tor bridges for use in censored networks
-- **Secure wipe** - end the session and delete all local state with a single command
+- **Secure wipe** - end the session, zero sensitive data in memory and delete all local state with a single command or shortcut
 - **Session fingerprint** - verify that the connection has not been intercepted by comparing a shared fingerprint
 - **Session timeout** - automatically end the session with a secure wipe after a certain period of time
 - **Convenience features** - typing indicators, delivery receipts, away status, message search, peer mentioning, and more
