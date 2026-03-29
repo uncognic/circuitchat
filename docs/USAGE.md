@@ -71,9 +71,10 @@ Once connected, both sides perform a Noise handshake and (optionally) authentica
 | `/help` | Show the list of commands |
 | `/status` | Show connection and session status |
 | `/ping` | Send a ping message to the peer |
-| `/panic` / `/wipe` | End the session immediately and delete all state (including config) |
+| `/panic` / `/wipe` | End the session immediately and delete all state (including config, downloads and chat exports) |
 | `/find <query>` | Search message history for `<query>` and show matching messages |
 | `/clear` | Clear the screen (does not delete history) |
+| `/exportchat` | Export the chat history as a text file in the `exports/` directory |
 
 See [File transfer](file-transfer.md)
 

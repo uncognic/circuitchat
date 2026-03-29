@@ -342,6 +342,18 @@ fn downloads_dir() -> Result<PathBuf, Box<dyn Error>> {
     Ok(exe_dir.join("downloads"))
 }
 
+pub fn exports_dir() -> Result<PathBuf, Box<dyn Error>> {
+    let exe_dir = std::env::current_exe()?
+        .parent()
+        .ok_or("could not determine executable directory")?
+        .to_path_buf();
+    Ok(exe_dir.join("exports"))
+}
+
+pub fn download_path(name: &str) -> Result<PathBuf, Box<dyn Error>> {
+    let dir = downloads_dir()?;
+    Ok(dir.join(sanitize_filename(name)))
+}
 pub fn remove_downloads_dir() -> Result<(), Box<dyn Error>> {
     let dir = downloads_dir()?;
     if dir.exists() {
@@ -349,12 +361,6 @@ pub fn remove_downloads_dir() -> Result<(), Box<dyn Error>> {
     }
     Ok(())
 }
-
-pub fn download_path(name: &str) -> Result<PathBuf, Box<dyn Error>> {
-    let dir = downloads_dir()?;
-    Ok(dir.join(sanitize_filename(name)))
-}
-
 pub fn file_xxh3(path: &Path) -> Result<Vec<u8>, Box<dyn Error>> {
     use xxhash_rust::xxh3::Xxh3;
     let mut hasher = Xxh3::new();

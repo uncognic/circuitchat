@@ -1,5 +1,6 @@
 use std::env;
 use std::error::Error;
+use std::io::Write;
 
 use arti_client::config::CfgPath;
 use arti_client::{StreamPrefs, TorClient, TorClientConfig};
@@ -16,7 +17,7 @@ use tor_hsservice::status::State;
 mod bot;
 mod ccscript;
 mod config;
-mod file_transfer;
+mod files;
 mod fingerprint;
 mod noise_peer;
 mod storage;
@@ -31,6 +32,7 @@ use noise_peer::NoisePeer;
 use std::process;
 use storage::{MessageDirection, Storage, clear_history};
 use zeroize::Zeroize;
+use chrono::Local;
 
 const PATTERN: &str = "Noise_NN_25519_ChaChaPoly_BLAKE2s";
 const CONNECT_RETRY_DELAY: std::time::Duration = std::time::Duration::from_secs(10);
@@ -103,19 +105,26 @@ fn perform_panic_and_exit(storage: Option<Storage>) -> Result<(), Box<dyn Error>
         zero_directory_contents(&cache_dir);
         let _ = std::fs::remove_dir_all(&cache_dir);
     }
+
     let state_dir = exe_dir.join("state");
     if state_dir.exists() {
         zero_directory_contents(&state_dir);
         let _ = std::fs::remove_dir_all(&state_dir);
     }
 
+    let exports_dir = exe_dir.join("exports");
+    if exports_dir.exists() {
+        zero_directory_contents(&exports_dir);
+        let _ = std::fs::remove_dir_all(&exports_dir);
+    }
+    
     if let Ok(cfg_path) = crate::config::config_path() {
         if cfg_path.exists() {
             let _ = crate::storage::zero_and_delete_file(&cfg_path);
         }
     }
 
-    let _ = crate::file_transfer::remove_downloads_dir();
+    let _ = crate::files::remove_downloads_dir();
 
     let _ = ratatui::restore();
     let _ = execute!(std::io::stdout(), Clear(ClearType::All), MoveTo(0, 0));
@@ -193,18 +202,18 @@ where
     }
     terminal.draw(|f| app.draw(f))?;
     app.scroll_to_bottom();
-    let _ = np.send(&file_transfer::encode_version_negotiate()).await;
+    let _ = np.send(&files::encode_version_negotiate()).await;
     if let Ok(Ok(msg)) =
         tokio::time::timeout(std::time::Duration::from_millis(250), np.recv()).await
     {
-        if let file_transfer::ParsedMessage::VersionNegotiate {
+        if let files::ParsedMessage::VersionNegotiate {
             major,
             minor,
             patch,
-        } = file_transfer::parse_message(&msg)
+        } = files::parse_message(&msg)
         {
             status_ctx.peer_version = Some((major, minor, patch));
-            let (our_major, our_minor, our_patch) = file_transfer::protocol_version();
+            let (our_major, our_minor, our_patch) = files::protocol_version();
             if major != our_major || minor != our_minor || patch != our_patch {
                 let mut warn = format!(
                     "warning: peer protocol {}.{}.{} differs from local {}.{}.{}",
@@ -222,9 +231,9 @@ where
         }
     }
     let mut events = EventStream::new();
-    let mut incoming_file: Option<file_transfer::IncomingFile> = None;
-    let mut outgoing_file: Option<file_transfer::OutgoingFile> = None;
-    let mut pending_offer: Option<file_transfer::OutgoingFile> = None;
+    let mut incoming_file: Option<files::IncomingFile> = None;
+    let mut outgoing_file: Option<files::OutgoingFile> = None;
+    let mut pending_offer: Option<files::OutgoingFile> = None;
     let mut last_input_empty = true;
 
     let mut last_activity = tokio::time::Instant::now();
@@ -269,7 +278,7 @@ where
             };
 
             if cancelled {
-                let _ = np.send(&file_transfer::encode_cancel()).await;
+                let _ = np.send(&files::encode_cancel()).await;
                 let out = outgoing_file.take().unwrap();
                 app.add_plain_message(
                     MessageDirection::Sent,
@@ -283,7 +292,7 @@ where
             let result = outgoing_file.as_mut().unwrap().read_next_chunk();
             match result {
                 Ok(Some(data)) => {
-                    if let Err(e) = np.send(&file_transfer::encode_chunk(&data)).await {
+                    if let Err(e) = np.send(&files::encode_chunk(&data)).await {
                         app.add_plain_message(
                             MessageDirection::Sent,
                             format!("[file] send error: {}", e),
@@ -297,14 +306,14 @@ where
                     }
                 }
                 Ok(None) => {
-                    let _ = np.send(&file_transfer::encode_done()).await;
+                    let _ = np.send(&files::encode_done()).await;
                     let out = outgoing_file.take().unwrap();
                     app.add_plain_message(
                         MessageDirection::Sent,
                         format!(
                             "[file] sent {} ({})",
                             out.name,
-                            file_transfer::format_size(out.size)
+                            files::format_size(out.size)
                         ),
                         tui::now_timestamp(time_local, hour24, show_tz, show_seconds),
                     );
@@ -328,7 +337,7 @@ where
                 if let Some(idle_dur) = idle_away_duration {
                     if !is_away && last_activity.elapsed() >= idle_dur {
                         is_away = true;
-                        let _ = np.send(&file_transfer::encode_away()).await;
+                        let _ = np.send(&files::encode_away()).await;
                     }
                 }
                 terminal.draw(|f| app.draw(f))?;
@@ -342,7 +351,7 @@ where
                     }
                 }
                 awaiting_ping_response = false;
-                let _ = np.send(&file_transfer::encode_ping()).await;
+                let _ = np.send(&files::encode_ping()).await;
             }
             _ = async {
                 if let Some(deadline) = session_deadline_tokio {
@@ -365,10 +374,10 @@ where
                             peer_responding = true;
                             app.status = app.status.replace(" | peer not responding", "");
                         }
-                        match file_transfer::parse_message(&msg) {
-                            file_transfer::ParsedMessage::VersionNegotiate { major, minor, patch } => {
+                        match files::parse_message(&msg) {
+                            files::ParsedMessage::VersionNegotiate { major, minor, patch } => {
                                 status_ctx.peer_version = Some((major, minor, patch));
-                                let (our_major, our_minor, our_patch) = file_transfer::protocol_version();
+                                let (our_major, our_minor, our_patch) = files::protocol_version();
 
                                 if major != our_major || minor != our_minor || patch != our_patch {
                                     let mut warn = format!("warning: peer protocol {}.{}.{} differs from local {}.{}.{}", major, minor, patch, our_major, our_minor, our_patch);
@@ -383,7 +392,7 @@ where
                                 }
                             }
 
-                            file_transfer::ParsedMessage::Text(content) => {
+                            files::ParsedMessage::Text(content) => {
                                 let spans = if content.contains("@peer") {
                                     tui::highlighted(&content, "@peer")
                                 } else {
@@ -400,7 +409,7 @@ where
                                     }
                                 }
                                 if delivery_receipts {
-                                    let _ = np.send(&file_transfer::encode_delivered()).await;
+                                    let _ = np.send(&files::encode_delivered()).await;
                                 }
                                 if typing_indicators {
                                     app.peer_typing = false;
@@ -411,8 +420,8 @@ where
                                     app.status = app.status.replace(" | peer is away", "");
                                 }
                             }
-                            file_transfer::ParsedMessage::FileOffer { name, size, checksum } => {
-                                let size_str = file_transfer::format_size(size);
+                            files::ParsedMessage::FileOffer { name, size, checksum } => {
+                                let size_str = files::format_size(size);
                                 app.add_plain_message(
                                     MessageDirection::Received,
                                     format!(
@@ -423,7 +432,7 @@ where
                                 );
                                 app.pending_incoming_offer = Some((name, size, checksum));
                             }
-                            file_transfer::ParsedMessage::FileChunk(data) => {
+                            files::ParsedMessage::FileChunk(data) => {
                                 if let Some(ref mut inc) = incoming_file {
                                     if let Err(e) = inc.write_chunk(&data) {
                                         app.status = format!("file write error: {}", e);
@@ -434,7 +443,7 @@ where
                                     }
                                 }
                             }
-                            file_transfer::ParsedMessage::FileDone => {
+                            files::ParsedMessage::FileDone => {
                                 if let Some(inc) = incoming_file.take() {
                                     let name = inc.name.clone();
                                     let size = inc.size;
@@ -445,7 +454,7 @@ where
                                                 format!(
                                                     "[file] saved {} ({}) -> {}",
                                                     name,
-                                                    file_transfer::format_size(size),
+                                                    files::format_size(size),
                                                     path.display()
                                                 ),
                                                 tui::now_timestamp(time_local, hour24, show_tz, show_seconds),
@@ -460,7 +469,7 @@ where
                                     }
                                 }
                             }
-                            file_transfer::ParsedMessage::FileCancel => {
+                            files::ParsedMessage::FileCancel => {
                                 if let Some(inc) = incoming_file.take() {
                                     inc.cancel();
                                         app.add_plain_message(
@@ -472,7 +481,7 @@ where
                                     app.clear_recv_progress();
                                 }
                             }
-                            file_transfer::ParsedMessage::FileAccept(offset) => {
+                            files::ParsedMessage::FileAccept(offset) => {
                                 if let Some(mut out) = pending_offer.take() {
                                     if let Err(e) = out.seek_to(offset) {
                                         app.status = format!("file seek error: {}", e);
@@ -488,7 +497,7 @@ where
                                     }
                                 }
                             }
-                            file_transfer::ParsedMessage::FileReject => {
+                            files::ParsedMessage::FileReject => {
                                 if let Some(out) = pending_offer.take() {
                                     app.add_plain_message(
                                         MessageDirection::Received,
@@ -497,29 +506,29 @@ where
                                     );
                                 }
                             }
-                            file_transfer::ParsedMessage::TypingStart => {
+                            files::ParsedMessage::TypingStart => {
                                 if typing_indicators {
                                     app.peer_typing = true;
                                     let current = app.status.trim_end_matches(" | peer is typing...").to_string();
                                     app.status = format!("{} | peer is typing...", current);
                                 }
                             }
-                            file_transfer::ParsedMessage::TypingStop => {
+                            files::ParsedMessage::TypingStop => {
                                 if typing_indicators {
                                     app.peer_typing = false;
                                     app.status = app.status.replace(" | peer is typing...", "");
                                 }
                             }
-                            file_transfer::ParsedMessage::Delivered => {
+                            files::ParsedMessage::Delivered => {
                                 if delivery_receipts && app.pending_delivery > 0 {
                                     app.pending_delivery -= 1;
                                     app.mark_last_sent_delivered();
                                 }
                             }
-                            file_transfer::ParsedMessage::Ping => {
-                                let _ = np.send(&file_transfer::encode_pong()).await;
+                            files::ParsedMessage::Ping => {
+                                let _ = np.send(&files::encode_pong()).await;
                             }
-                            file_transfer::ParsedMessage::Pong => {
+                            files::ParsedMessage::Pong => {
                                 if awaiting_ping_response {
                                     app.add_plain_message(
                                         MessageDirection::Received,
@@ -529,14 +538,14 @@ where
                                 }
                                 awaiting_ping_response = false;
                             }
-                            file_transfer::ParsedMessage::Away => {
+                            files::ParsedMessage::Away => {
                                 app.peer_away = true;
                                 if !app.status.contains("| peer is away") {
                                     let base = app.status.replace(" | peer is away", "");
                                     app.status = format!("{} | peer is away", base);
                                 }
                             }
-                            file_transfer::ParsedMessage::Back => {
+                            files::ParsedMessage::Back => {
                                 app.peer_away = false;
                                 app.status = app.status.replace(" | peer is away", "");
                             }
@@ -555,28 +564,28 @@ where
                         last_activity = tokio::time::Instant::now();
                         if is_away {
                             is_away = false;
-                            let _ = np.send(&file_transfer::encode_back()).await;
+                            let _ = np.send(&files::encode_back()).await;
                         }
                         let submitted = app.handle_key(key);
                         if typing_indicators {
                                 let now_empty = app.input.is_empty();
                                 if last_input_empty && !now_empty {
-                                    let _ = np.send(&file_transfer::encode_typing_start()).await;
+                                    let _ = np.send(&files::encode_typing_start()).await;
                                 } else if !last_input_empty && now_empty {
-                                    let _ = np.send(&file_transfer::encode_typing_stop()).await;
+                                    let _ = np.send(&files::encode_typing_stop()).await;
                                 }
                                 last_input_empty = now_empty;
                             }
                             if let Some(text) = submitted {
                             if text.starts_with("/send ") {
                                 let path = text[6..].trim();
-                                match file_transfer::OutgoingFile::open(path) {
+                                match files::OutgoingFile::open(path) {
                                     Ok(mut out) => {
                                         if randomize_filenames {
-                                            out.name = file_transfer::randomize_filename_preserve_ext(&out.name);
+                                            out.name = files::randomize_filename_preserve_ext(&out.name);
                                         }
                                         if let Err(e) = np.send(
-                                            &file_transfer::encode_offer_with_checksum(&out.name, out.size, Some(&out.checksum)),
+                                            &files::encode_offer_with_checksum(&out.name, out.size, Some(&out.checksum)),
                                         ).await {
                                             app.status = format!("send failed: {}", e);
                                         } else {
@@ -585,7 +594,7 @@ where
                                                 format!(
                                                     "[file] offered {} ({}) - waiting for peer to accept",
                                                     out.name,
-                                                    file_transfer::format_size(out.size)
+                                                    files::format_size(out.size)
                                                 ),
                                                 tui::now_timestamp(time_local, hour24, show_tz, show_seconds),
                                             );
@@ -616,14 +625,14 @@ where
                                     let name = offer.0.clone();
                                     let size = offer.1;
                                     let checksum = offer.2.as_ref();
-                                    let existing = match file_transfer::existing_download_size(&name) {
+                                    let existing = match files::existing_download_size(&name) {
                                         Ok(n) => n,
                                         Err(_) => 0,
                                     };
 
                                     if existing == size && checksum.is_some() {
-                                        if let Ok(path) = file_transfer::download_path(&name) {
-                                                if let Ok(sum) = file_transfer::file_xxh3(&path) {
+                                        if let Ok(path) = files::download_path(&name) {
+                                                if let Ok(sum) = files::file_xxh3(&path) {
                                                 if &sum == checksum.unwrap() {
                                                     app.add_plain_message(
                                                         MessageDirection::Received,
@@ -637,12 +646,12 @@ where
                                         }
                                     }
                                     if let Err(e) = np
-                                        .send(&file_transfer::encode_accept_with_offset(existing))
+                                        .send(&files::encode_accept_with_offset(existing))
                                         .await
                                     {
                                         app.status = format!("send failed: {}", e);
                                     } else {
-                                        match file_transfer::IncomingFile::begin(&name, size, offer.2.as_deref()) {
+                                        match files::IncomingFile::begin(&name, size, offer.2.as_deref()) {
                                             Ok(inc) => {
                                                 app.set_recv_progress(name.clone(), size);
                                                 incoming_file = Some(inc);
@@ -664,7 +673,7 @@ where
                             } else if text == "/reject" {
                                 if let Some(ref offer) = app.pending_incoming_offer {
                                     let name = offer.0.clone();
-                                    let _ = np.send(&file_transfer::encode_reject()).await;
+                                    let _ = np.send(&files::encode_reject()).await;
                                     app.pending_incoming_offer = None;
                                     app.add_plain_message(
                                         MessageDirection::Sent,
@@ -732,7 +741,7 @@ where
                                     format!("[status] peer protocol version: {}", peer_version_str),
                                     tui::now_timestamp(time_local, hour24, show_tz, show_seconds),
                                 );
-                                let (our_major, our_minor, our_patch) = file_transfer::protocol_version();
+                                let (our_major, our_minor, our_patch) = files::protocol_version();
                                 app.add_plain_message(
                                     MessageDirection::System,
                                     format!("[status] protocol version: {}.{}.{}", our_major, our_minor, our_patch),
@@ -777,7 +786,87 @@ where
                                     "Ping?".to_string(),
                                     tui::now_timestamp(time_local, hour24, show_tz, show_seconds),
                                 );
-                                let _ = np.send(&file_transfer::encode_ping()).await;
+                                let _ = np.send(&files::encode_ping()).await;
+                            } else if text == "/exportchat" {
+                                let dir = match files::exports_dir() {
+                                    Ok(d) => d,
+                                    Err(e) => {
+                                        app.status = format!("export failed: {}", e);
+                                        continue;
+                                    }
+                                };
+                                if let Err(e) = std::fs::create_dir_all(&dir) {
+                                    app.status = format!("export failed: {}", e);
+                                    continue;
+                                }
+
+                                let now = Local::now();
+                                let now_formatted = now.format("%Y-%m-%d_%H-%M-%S");
+                                let filename = format!("chat_export_{}.txt", now_formatted);
+                                let path = dir.join(&filename);
+
+                                match std::fs::File::create(&path) {
+                                    Ok(mut f) => {
+                                        // from storage if available
+                                        let res = if let Some(ref s) = *storage {
+                                            match s.load_history() {
+                                                Ok(messages) => {
+                                                    for msg in messages {
+                                                        let prefix = match msg.direction {
+                                                            MessageDirection::Sent => "you",
+                                                            MessageDirection::Received => "peer",
+                                                            MessageDirection::System => "system",
+                                                        };
+                                                        let time = tui::format_timestamp(
+                                                            msg.timestamp,
+                                                            time_local,
+                                                            hour24,
+                                                            show_tz,
+                                                            show_seconds,
+                                                        );
+                                                        let text = String::from_utf8_lossy(&msg.content);
+                                                        if let Err(e) = writeln!(f, "[{}] {}: {}", time, prefix, text)
+                                                        {
+                                                            return Err(Box::new(e));
+                                                        }
+                                                    }
+                                                    Ok(())
+                                                }
+                                                Err(e) => Err(e),
+                                            }
+                                        } else {
+                                            // export from in memory messages
+                                            for m in &app.messages {
+                                                let prefix = match m.direction {
+                                                    MessageDirection::Sent => "you",
+                                                    MessageDirection::Received => "peer",
+                                                    MessageDirection::System => "system",
+                                                };
+                                                let text: String = m.content.iter().map(|(s, _)| s.as_str()).collect();
+                                                if let Err(e) = writeln!(f, "[{}] {}: {}", m.timestamp, prefix, text) {
+                                                    return Err(Box::new(e));
+                                                }
+                                            }
+                                            Ok(())
+                                        };
+
+                                        match res {
+                                            Ok(()) => {
+                                                app.add_plain_message(
+                                                    MessageDirection::System,
+                                                    format!("[export] saved chat to {}", path.display()),
+                                                    tui::now_timestamp(time_local, hour24, show_tz, show_seconds),
+                                                );
+                                            }
+                                            Err(e) => {
+                                                app.status = format!("export failed: {}", e);
+                                            }
+                                        }
+                                    }
+                                    Err(e) => {
+                                        app.status = format!("export failed: {}", e);
+                                    }
+                                }
                             } else if text.starts_with("/find") {
                                 let ts = tui::now_timestamp(time_local, hour24, show_tz, show_seconds);
                                 let term = text[6..].trim();
@@ -825,7 +914,7 @@ where
                                     tui::now_timestamp(time_local, hour24, show_tz, show_seconds),
                                 );
                                 if typing_indicators {
-                                    let _ = np.send(&file_transfer::encode_typing_stop()).await;
+                                    let _ = np.send(&files::encode_typing_stop()).await;
                                     last_input_empty = true;
                                 }
                                 if delivery_receipts {

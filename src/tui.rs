@@ -523,8 +523,8 @@ impl App {
 
         let size_line = format!(
             " {} / {}",
-            crate::file_transfer::format_size(t.transferred),
-            crate::file_transfer::format_size(t.size)
+            crate::files::format_size(t.transferred),
+            crate::files::format_size(t.size)
         );
 
         let elapsed = t.start.elapsed();
@@ -535,7 +535,7 @@ impl App {
         };
         let speed_line = format!(
             " speed: {}/s",
-            crate::file_transfer::format_size(speed_bps as u64)
+            crate::files::format_size(speed_bps as u64)
         );
 
         let eta_line = {

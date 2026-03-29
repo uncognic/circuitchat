@@ -1,7 +1,7 @@
 use std::error::Error;
 
 use crate::ccscript::{self, Action, Block, Event, EventContext, Script};
-use crate::file_transfer;
+use crate::files;
 use crate::noise_peer::NoisePeer;
 
 pub struct ActionOutcome {
@@ -111,18 +111,18 @@ where
 {
     let fingerprint = np.session_fingerprint.clone();
 
-    let _ = np.send(&file_transfer::encode_version_negotiate()).await;
+    let _ = np.send(&files::encode_version_negotiate()).await;
 
     if let Ok(Ok(msg)) =
         tokio::time::timeout(std::time::Duration::from_millis(250), np.recv()).await
     {
-        if let file_transfer::ParsedMessage::VersionNegotiate {
+        if let files::ParsedMessage::VersionNegotiate {
             major,
             minor: _,
             patch: _,
-        } = file_transfer::parse_message(&msg)
+        } = files::parse_message(&msg)
         {
-            let (our_major, _, _) = file_transfer::protocol_version();
+            let (our_major, _, _) = files::protocol_version();
             if major != our_major {
                 eprintln!("warning: peer has incompatible major protocol version");
             }
@@ -137,10 +137,10 @@ where
     let outcome = run_handlers(script, &Event::Connect, &ctx);
     send_outcome(&mut np, &outcome).await?;
     for path in &outcome.send_files {
-        match file_transfer::OutgoingFile::open(path) {
+        match files::OutgoingFile::open(path) {
             Ok(out) => {
                 let _ = np
-                    .send(&file_transfer::encode_offer_with_checksum(
+                    .send(&files::encode_offer_with_checksum(
                         &out.name,
                         out.size,
                         Some(&out.checksum),
@@ -149,7 +149,7 @@ where
                 println!(
                     "[file] offered {} ({}) - waiting for peer to accept",
                     out.name,
-                    file_transfer::format_size(out.size)
+                    files::format_size(out.size)
                 );
             }
             Err(e) => eprintln!("cannot open file: {}", e),
@@ -159,14 +159,14 @@ where
         return Ok(());
     }
 
-    let mut incoming_file: Option<file_transfer::IncomingFile> = None;
-    let mut pending_offer: Option<file_transfer::OutgoingFile> = None;
+    let mut incoming_file: Option<files::IncomingFile> = None;
+    let mut pending_offer: Option<files::OutgoingFile> = None;
 
     loop {
         if incoming_file.is_some() {
             match np.recv().await {
-                Ok(msg) => match file_transfer::parse_message(&msg) {
-                    file_transfer::ParsedMessage::FileChunk(data) => {
+                Ok(msg) => match files::parse_message(&msg) {
+                    files::ParsedMessage::FileChunk(data) => {
                         if let Some(ref mut inc) = incoming_file {
                             if let Err(e) = inc.write_chunk(&data) {
                                 eprintln!("file write error: {}", e);
@@ -174,7 +174,7 @@ where
                             }
                         }
                     }
-                    file_transfer::ParsedMessage::FileDone => {
+                    files::ParsedMessage::FileDone => {
                         if let Some(inc) = incoming_file.take() {
                             let name = inc.name.clone();
                             let size = inc.size;
@@ -183,7 +183,7 @@ where
                                     println!(
                                         "[file] saved {} ({}) -> {}",
                                         name,
-                                        file_transfer::format_size(size),
+                                        files::format_size(size),
                                         path.display()
                                     );
                                 }
@@ -191,7 +191,7 @@ where
                             }
                         }
                     }
-                    file_transfer::ParsedMessage::FileCancel => {
+                    files::ParsedMessage::FileCancel => {
                         if let Some(inc) = incoming_file.take() {
                             inc.cancel();
                             println!("[file] peer cancelled the transfer");
@@ -209,8 +209,8 @@ where
         }
 
         match np.recv().await {
-            Ok(msg) => match file_transfer::parse_message(&msg) {
-                file_transfer::ParsedMessage::Text(content) => {
+            Ok(msg) => match files::parse_message(&msg) {
+                files::ParsedMessage::Text(content) => {
                     let mut ctx = EventContext::new_with_bot_state(
                         Some(fingerprint.clone()),
                         Some(bot_start),
@@ -220,10 +220,10 @@ where
                     let outcome = run_handlers(script, &Event::Message, &ctx);
                     send_outcome(&mut np, &outcome).await?;
                     for path in &outcome.send_files {
-                        match file_transfer::OutgoingFile::open(path) {
+                        match files::OutgoingFile::open(path) {
                             Ok(out) => {
                                 if let Err(e) = np
-                                    .send(&file_transfer::encode_offer_with_checksum(
+                                    .send(&files::encode_offer_with_checksum(
                                         &out.name,
                                         out.size,
                                         Some(&out.checksum),
@@ -235,7 +235,7 @@ where
                                     println!(
                                         "[file] offered {} ({}) - waiting for peer to accept",
                                         out.name,
-                                        file_transfer::format_size(out.size)
+                                        files::format_size(out.size)
                                     );
                                     pending_offer = Some(out);
                                 }
@@ -249,7 +249,7 @@ where
                         return Ok(());
                     }
                 }
-                file_transfer::ParsedMessage::FileOffer {
+                files::ParsedMessage::FileOffer {
                     name,
                     size,
                     checksum,
@@ -264,10 +264,10 @@ where
                     let outcome = run_handlers(script, &Event::File, &ctx);
                     send_outcome(&mut np, &outcome).await?;
                     for path in &outcome.send_files {
-                        match file_transfer::OutgoingFile::open(path) {
+                        match files::OutgoingFile::open(path) {
                             Ok(out) => {
                                 if let Err(e) = np
-                                    .send(&file_transfer::encode_offer_with_checksum(
+                                    .send(&files::encode_offer_with_checksum(
                                         &out.name,
                                         out.size,
                                         Some(&out.checksum),
@@ -279,7 +279,7 @@ where
                                     println!(
                                         "[file] offered {} ({}) - waiting for peer to accept",
                                         out.name,
-                                        file_transfer::format_size(out.size)
+                                        files::format_size(out.size)
                                     );
                                     pending_offer = Some(out);
                                 }
@@ -288,22 +288,22 @@ where
                         }
                     }
                     if outcome.accept_file {
-                        let existing = file_transfer::existing_download_size(&name).unwrap_or(0);
-                        np.send(&file_transfer::encode_accept_with_offset(existing))
+                        let existing = files::existing_download_size(&name).unwrap_or(0);
+                        np.send(&files::encode_accept_with_offset(existing))
                             .await?;
-                        match file_transfer::IncomingFile::begin(&name, size, checksum.as_deref()) {
+                        match files::IncomingFile::begin(&name, size, checksum.as_deref()) {
                             Ok(inc) => {
                                 println!(
                                     "[file] accepted {} ({})",
                                     name,
-                                    file_transfer::format_size(size)
+                                    files::format_size(size)
                                 );
                                 incoming_file = Some(inc);
                             }
                             Err(e) => eprintln!("file receive error: {}", e),
                         }
                     } else if outcome.reject_file {
-                        np.send(&file_transfer::encode_reject()).await?;
+                        np.send(&files::encode_reject()).await?;
                         println!("[file] rejected {}", name);
                     }
                     if outcome.disconnect {
@@ -312,10 +312,10 @@ where
                         return Ok(());
                     }
                 }
-                file_transfer::ParsedMessage::Ping => {
-                    let _ = np.send(&file_transfer::encode_pong()).await;
+                files::ParsedMessage::Ping => {
+                    let _ = np.send(&files::encode_pong()).await;
                 }
-                file_transfer::ParsedMessage::FileAccept(offset) => {
+                files::ParsedMessage::FileAccept(offset) => {
                     if let Some(mut out) = pending_offer.take() {
                         if let Err(e) = out.seek_to(offset) {
                             eprintln!("file seek error: {}", e);
@@ -325,18 +325,18 @@ where
                             match out.read_next_chunk() {
                                 Ok(Some(chunk)) => {
                                     if let Err(e) =
-                                        np.send(&file_transfer::encode_chunk(&chunk)).await
+                                        np.send(&files::encode_chunk(&chunk)).await
                                     {
                                         eprintln!("file send chunk error: {}", e);
                                         break;
                                     }
                                 }
                                 Ok(None) => {
-                                    let _ = np.send(&file_transfer::encode_done()).await;
+                                    let _ = np.send(&files::encode_done()).await;
                                     println!(
                                         "[file] sent {} ({})",
                                         out.name,
-                                        file_transfer::format_size(out.size)
+                                        files::format_size(out.size)
                                     );
                                     break;
                                 }
@@ -348,17 +348,17 @@ where
                         }
                     }
                 }
-                file_transfer::ParsedMessage::FileReject => {
+                files::ParsedMessage::FileReject => {
                     if let Some(out) = pending_offer.take() {
                         println!("[file] peer rejected {}", out.name);
                     }
                 }
-                file_transfer::ParsedMessage::VersionNegotiate {
+                files::ParsedMessage::VersionNegotiate {
                     major,
                     minor,
                     patch,
                 } => {
-                    let (our_major, our_minor, our_patch) = file_transfer::protocol_version();
+                    let (our_major, our_minor, our_patch) = files::protocol_version();
                     if major != our_major {
                         eprintln!(
                             "warning: incompatible peer version {}.{}.{} (ours {}.{}.{})",

@@ -8,6 +8,6 @@
 - more features for the bot
 - AUR package (would be cool)
 - some sort of message expiry, where peers agree to delete messages older than X time
-
+- allow configuring directories for downloads, exports, state, cache etc. (currently they are all created in the executable directory)
 future goals:
 - separate the protocol into an actual crate
