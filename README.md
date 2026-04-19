@@ -8,18 +8,18 @@ P2P encrypted messaging over Tor in Rust. Creates ephemeral onion services for c
 <video src="https://github.com/user-attachments/assets/42a4bd25-fde1-499a-b008-045f01308843" autoplay loop muted playback-inline></video>
 
 ## Features
-- **Tor-first** - uses [Arti](https://gitlab.torproject.org/tpo/core/arti) directly. no system Tor installation needed
-- **E2EE** - every session runs a full `Noise_NN_25519_ChaChaPoly_BLAKE2s` handshake over the Tor stream
-- **Scripting/Automation** - create custom bots for circuitchat with a simple event-driven scripting language (see [docs/ccscript.md](docs/CCSCRIPT.md))
-- **Forward secrecy** - ephemeral Noise keys mean past sessions cannot be decrypted even if local data is later compromised
-- **Mutual auth** - optional shared password for session authentication (HMAC-SHA256 over an Argon2-derived key)
-- **File transfer** - send and receive files
-- **Encrypted history** - optionally persist messages in a local SQLite database encrypted per-message with XChaCha20-Poly1305
-- **Bridge support** - configure Tor bridges for use in censored networks
-- **Secure wipe** - end the session, zero sensitive data in memory and delete all local state with a single command or shortcut
-- **Session fingerprint** - verify that the connection has not been intercepted by comparing a shared fingerprint
-- **Session timeout** - automatically end the session with a secure wipe after a certain period of time
-- **Convenience features** - typing indicators, delivery receipts, away status, message search, peer mentioning, and more
+- Tor - uses [Arti](https://gitlab.torproject.org/tpo/core/arti)
+- E2EE - every session uses `Noise_NN_25519_ChaChaPoly_BLAKE2s`
+- Scripting/Automation - create custom bots for circuitchat with a simple event-driven scripting language (see [docs/ccscript.md](docs/CCSCRIPT.md))
+- Forward secrecy* - ephemeral Noise keys mean past sessions cannot be decrypted even if local data is later compromised
+- Mutual auth - optional shared password for session authentication (HMAC-SHA256 over an Argon2-derived key)
+- File transfer - send and receive files
+- Encrypted history - optionally persist messages in a local SQLite database encrypted per-message with XChaCha20-Poly1305
+- Bridge support - configure Tor bridges for use in censored networks
+- Secure wipe - end the session, zero sensitive data in memory and delete all local state with a single command or shortcut
+- Session fingerprint - verify that the connection has not been intercepted by comparing a shared fingerprint
+- Session timeout - automatically end the session with a secure wipe after a certain period of time
+- Convenience features - typing indicators, delivery receipts, away status, message search, peer mentioning, and more
 
 
 ## Quick start
